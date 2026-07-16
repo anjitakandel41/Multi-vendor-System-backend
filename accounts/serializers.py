@@ -1,20 +1,15 @@
-from django.contrib.auth import authenticate
-from django.contrib.auth import get_user_model
-
+# accounts/serializers.py
+from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
-
 from rest_framework_simplejwt.tokens import RefreshToken
-
 from .models import Profile
-
 
 User = get_user_model()
 
 
-# ADD THIS USER SERIALIZER
 class UserSerializer(serializers.ModelSerializer):
-    """Serializer for User model - used for MeView and user responses"""
-    
+    """Serializer for User model"""
     class Meta:
         model = User
         fields = ['id', 'username', 'email', 'role', 'date_joined', 'last_login']
@@ -22,11 +17,7 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class RegisterSerializer(serializers.ModelSerializer):
-
-    password = serializers.CharField(
-        write_only=True,
-        min_length=8
-    )
+    password = serializers.CharField(write_only=True, min_length=8)
 
     class Meta:
         model = User
@@ -35,12 +26,8 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     def validate_username(self, value):
         if User.objects.filter(username=value).exists():
-            raise serializers.ValidationError(
-                'Username already exists.'
-            )
+            raise serializers.ValidationError('Username already exists.')
         return value
-
-
 
     def validate_email(self, value):
         if User.objects.filter(email=value).exists():
@@ -53,14 +40,12 @@ class RegisterSerializer(serializers.ModelSerializer):
             email=validated_data['email'],
             password=validated_data['password'],
             role='customer'
-            ## is_email_verified=False
         )
         Profile.objects.create(user=user)
         return user
 
 
 class LoginSerializer(serializers.Serializer):
-
     username = serializers.CharField()
     password = serializers.CharField(write_only=True)
 
@@ -76,7 +61,7 @@ class LoginSerializer(serializers.Serializer):
             raise serializers.ValidationError('Email is not verified.')
 
         refresh = RefreshToken.for_user(user)
-        response = {
+        return {
             'refresh': str(refresh),
             'access': str(refresh.access_token),
             'user': {
@@ -87,45 +72,8 @@ class LoginSerializer(serializers.Serializer):
             }
         }
 
-        # If the user owns a store, return their tenant so the client
-        # knows which X-Tenant-Slug to send for future requests.
-        try:
-            tenant = user.owned_tenant
-            response['tenant'] = {
-                'id': tenant.id,
-                'name': tenant.name,
-                'slug': tenant.slug,
-                'your_role': 'owner',
-                'note': f'Use header  X-Tenant-Slug: {tenant.slug}  in all store requests.',
-            }
-        except Exception:
-            # Check if this user is a member of any store
-            from tenants.models import TenantMember
-            memberships = list(
-                TenantMember.objects.filter(user=user, is_active=True)
-                .select_related('tenant')
-            )
-            if memberships:
-                response['memberships'] = [
-                    {
-                        'tenant_id':   m.tenant.id,
-                        'tenant_name': m.tenant.name,
-                        'tenant_slug': m.tenant.slug,
-                        'role':        m.role,
-                        'note':        f'Use header  X-Tenant-Slug: {m.tenant.slug}',
-                    }
-                    for m in memberships
-                ]
-
-        return response
-
 
 class AdminLoginSerializer(serializers.Serializer):
-    """
-    Login for vendor admins (store owners) and platform admins.
-    Returns tenant info so the client knows the X-Tenant-Slug to use.
-    For employees, use POST /api/tenants/login/ instead.
-    """
     username = serializers.CharField()
     password = serializers.CharField(write_only=True)
 
@@ -142,7 +90,7 @@ class AdminLoginSerializer(serializers.Serializer):
             raise serializers.ValidationError('Email is not verified.')
 
         refresh = RefreshToken.for_user(user)
-        response = {
+        return {
             'refresh': str(refresh),
             'access': str(refresh.access_token),
             'user': {
@@ -153,32 +101,8 @@ class AdminLoginSerializer(serializers.Serializer):
             }
         }
 
-        # Platform admin (is_staff) — no tenant, manages the platform itself
-        if user.is_staff:
-            response['account_type'] = 'platform_admin'
-            response['note'] = 'You manage the platform. Use POST /api/tenants/ to create stores.'
-            return response
-
-        # Vendor admin — return their owned store
-        try:
-            tenant = user.owned_tenant
-            response['account_type'] = 'vendor_admin'
-            response['tenant'] = {
-                'id': tenant.id,
-                'name': tenant.name,
-                'slug': tenant.slug,
-                'your_role': 'owner',
-                'note': f'Use header  X-Tenant-Slug: {tenant.slug}  in all store requests.',
-            }
-        except Exception:
-            response['account_type'] = 'admin_no_tenant'
-            response['note'] = 'No store found. Ask a platform admin to create a tenant for you.'
-
-        return response
-
 
 class ChangePasswordSerializer(serializers.Serializer):
-
     old_password = serializers.CharField(write_only=True)
     new_password = serializers.CharField(write_only=True, min_length=8)
     confirm_password = serializers.CharField(write_only=True)
@@ -208,40 +132,25 @@ class ChangePasswordSerializer(serializers.Serializer):
 
 
 class LogoutSerializer(serializers.Serializer):
-
-    refresh = serializers.CharField(
-        help_text='Paste your refresh token here to logout.'
-    )
+    refresh = serializers.CharField(help_text='Refresh token to blacklist.')
 
 
 class ProfileSerializer(serializers.ModelSerializer):
-
     username = serializers.CharField(source='user.username', read_only=True)
     email = serializers.CharField(source='user.email', read_only=True)
     role = serializers.CharField(source='user.role', read_only=True)
-
-    ### Shows generated or uploaded avatar URL
     avatar_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Profile
         fields = [
-            'id',
-            'username',
-            'email',
-            'role',
-            'avatar',           
-            'avatar_url',
-            'phone',
-            'address',
-            'city',
-            'created_at',
-            'updated_at',
+            'id', 'username', 'email', 'role', 'avatar', 'avatar_url',
+            'phone', 'address', 'city', 'bio', 'designation',
+            'date_of_birth', 'gender', 'emergency_contact', 'emergency_contact_name',
+            'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'avatar_url']
-        extra_kwargs = {
-            'avatar': {'write_only': True}  ### hide raw cloudinary field
-        }
+        extra_kwargs = {'avatar': {'write_only': True}}
 
     def get_avatar_url(self, obj):
         return obj.get_avatar_url()
@@ -249,29 +158,20 @@ class ProfileSerializer(serializers.ModelSerializer):
     def validate_avatar(self, value):
         if value:
             if hasattr(value, 'size') and value.size > 2 * 1024 * 1024:
-                raise serializers.ValidationError(
-                    'Avatar size must not exceed 2MB.'
-                )
+                raise serializers.ValidationError('Avatar size must not exceed 2MB.')
             if hasattr(value, 'content_type'):
                 allowed = ['image/jpeg', 'image/png', 'image/webp']
                 if value.content_type not in allowed:
-                    raise serializers.ValidationError(
-                        'Only JPEG, PNG, and WebP images are allowed.'
-                    )
+                    raise serializers.ValidationError('Only JPEG, PNG, and WebP images are allowed.')
         return value
 
 
 class VendorRegisterSerializer(serializers.Serializer):
-    """
-    One-step vendor registration.
-    Creates a CustomUser (role='admin') + Tenant (is_active=False) atomically.
-    The store stays inactive until a platform admin approves it.
-    """
-    username          = serializers.CharField(max_length=150)
-    email             = serializers.EmailField()
-    password          = serializers.CharField(write_only=True, min_length=8)
-    store_name        = serializers.CharField(max_length=255)
-    store_slug        = serializers.SlugField(max_length=100)
+    username = serializers.CharField(max_length=150)
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True, min_length=8)
+    store_name = serializers.CharField(max_length=255)
+    store_slug = serializers.SlugField(max_length=100)
     store_description = serializers.CharField(required=False, allow_blank=True, default='')
 
     def validate_username(self, value):
@@ -287,7 +187,7 @@ class VendorRegisterSerializer(serializers.Serializer):
     def validate_store_slug(self, value):
         from tenants.models import Tenant
         if Tenant.objects.filter(slug=value).exists():
-            raise serializers.ValidationError('A store with this slug already exists. Choose a different one.')
+            raise serializers.ValidationError('A store with this slug already exists.')
         return value
 
     def validate_store_name(self, value):
@@ -323,11 +223,6 @@ class VendorRegisterSerializer(serializers.Serializer):
 
 
 class VendorLoginSerializer(serializers.Serializer):
-    """
-    Login for store owners (vendor admins).
-    The account must have role='admin' and own a tenant store.
-    Returns the JWT token and the tenant slug to use as X-Tenant-Slug.
-    """
     username = serializers.CharField()
     password = serializers.CharField(write_only=True)
 
@@ -344,50 +239,36 @@ class VendorLoginSerializer(serializers.Serializer):
             tenant = user.owned_tenant
         except Exception:
             raise serializers.ValidationError({
-                'username': 'No store found for this account. Contact the platform admin.'
+                'username': 'No store found for this account.'
             })
 
         if not tenant.is_active:
             raise serializers.ValidationError({
-                'username': (
-                    'Your store registration is pending approval by the platform admin. '
-                    'You will be able to log in once your store is activated.'
-                )
+                'username': 'Your store is pending approval.'
             })
 
         refresh = RefreshToken.for_user(user)
         return {
             'refresh': str(refresh),
-            'access':  str(refresh.access_token),
+            'access': str(refresh.access_token),
             'user': {
-                'id':       user.id,
+                'id': user.id,
                 'username': user.username,
-                'email':    user.email,
+                'email': user.email,
             },
             'store': {
-                'id':         tenant.id,
-                'name':       tenant.name,
-                'slug':       tenant.slug,
-                'your_role':  'owner',
-            },
-            'next_step': (
-                f'Copy the slug and set  X-Tenant-Slug: {tenant.slug}  '
-                f'in the Authorize dialog (tenantAuth field) before using store endpoints.'
-            ),
+                'id': tenant.id,
+                'name': tenant.name,
+                'slug': tenant.slug,
+                'your_role': 'owner',
+            }
         }
 
 
 class EmployeeLoginSerializer(serializers.Serializer):
-    """
-    Login for store employees (manager / staff / viewer).
-    The user must be added to the store by the owner via POST /api/tenant-members/.
-    Returns the JWT token, the employee's role, and the tenant slug.
-    """
-    username    = serializers.CharField()
-    password    = serializers.CharField(write_only=True)
-    tenant_slug = serializers.SlugField(
-        help_text='Slug of the store you work at (e.g. techmart). Ask your store owner for this.'
-    )
+    username = serializers.CharField()
+    password = serializers.CharField(write_only=True)
+    tenant_slug = serializers.SlugField()
 
     def validate(self, attrs):
         user = authenticate(username=attrs['username'], password=attrs['password'])
@@ -403,58 +284,283 @@ class EmployeeLoginSerializer(serializers.Serializer):
         except Tenant.DoesNotExist:
             raise serializers.ValidationError({'tenant_slug': 'Store not found or inactive.'})
 
-        # Owners must use the vendor login endpoint
+        # Check if user is the owner (they should use vendor login)
         try:
             if user.owned_tenant == tenant:
                 raise serializers.ValidationError({
-                    'username': 'You are the store owner. Use the Vendor Login endpoint instead.'
+                    'username': 'You are the store owner. Please use vendor login.'
                 })
-        except Exception:
+        except:
             pass
 
         try:
             membership = TenantMember.objects.get(tenant=tenant, user=user, is_active=True)
         except TenantMember.DoesNotExist:
             raise serializers.ValidationError({
-                'tenant_slug': (
-                    'You are not a member of this store. '
-                    'Ask your store owner to add you via /api/tenant-members/.'
-                )
+                'tenant_slug': 'You are not a member of this store.'
             })
 
         refresh = RefreshToken.for_user(user)
         return {
             'refresh': str(refresh),
-            'access':  str(refresh.access_token),
+            'access': str(refresh.access_token),
             'user': {
-                'id':       user.id,
+                'id': user.id,
                 'username': user.username,
-                'email':    user.email,
+                'email': user.email,
             },
             'store': {
-                'id':         tenant.id,
-                'name':       tenant.name,
-                'slug':       tenant.slug,
-                'your_role':  membership.role,
-            },
-            'next_step': (
-                f'Copy the slug and set  X-Tenant-Slug: {tenant.slug}  '
-                f'in the Authorize dialog (tenantAuth field) before using store endpoints.'
-            ),
+                'id': tenant.id,
+                'name': tenant.name,
+                'slug': tenant.slug,
+                'your_role': membership.role,
+            }
         }
 
 
 class ForgotPasswordSerializer(serializers.Serializer):
     email = serializers.EmailField()
 
+    def validate_email(self, value):
+        try:
+            User.objects.get(email=value)
+        except User.DoesNotExist:
+            raise serializers.ValidationError("No user found with this email address.")
+        return value
+
 
 class ResetPasswordSerializer(serializers.Serializer):
-    password = serializers.CharField(write_only=True, min_length=8)
+    token = serializers.CharField()
+    new_password = serializers.CharField(write_only=True, min_length=8, validators=[validate_password])
     confirm_password = serializers.CharField(write_only=True)
 
     def validate(self, data):
-        if data['password'] != data['confirm_password']:
+        if data['new_password'] != data['confirm_password']:
             raise serializers.ValidationError({
                 'confirm_password': 'Passwords do not match.'
             })
         return data
+
+    def validate_token(self, value):
+        try:
+            user = User.objects.get(reset_password_token=value)
+            if not user.is_reset_token_valid():
+                raise serializers.ValidationError(
+                    "This password reset link has expired. Please request a new one."
+                )
+        except User.DoesNotExist:
+            raise serializers.ValidationError("Invalid reset token.")
+        return value
+
+    def save(self):
+        token = self.validated_data['token']
+        new_password = self.validated_data['new_password']
+        
+        try:
+            user = User.objects.get(reset_password_token=token)
+            user.set_password(new_password)
+            user.reset_password_token = None
+            user.reset_password_token_created_at = None
+            user.save()
+            return user
+        except User.DoesNotExist:
+            raise serializers.ValidationError("Invalid reset token.")
+
+
+# ============================================
+# VENDOR EMPLOYEE MANAGEMENT SERIALIZERS
+# ============================================
+
+class EmployeeCreateSerializer(serializers.Serializer):
+    """
+    Serializer for vendor to create employee accounts
+    """
+    username = serializers.CharField(max_length=150)
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True, min_length=8)
+    first_name = serializers.CharField(required=False, allow_blank=True)
+    last_name = serializers.CharField(required=False, allow_blank=True)
+    role = serializers.ChoiceField(
+        choices=['manager', 'staff', 'viewer'],
+        default='staff',
+        help_text="Employee role in the store"
+    )
+    phone = serializers.CharField(required=False, allow_blank=True)
+    designation = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_username(self, value):
+        if User.objects.filter(username=value).exists():
+            raise serializers.ValidationError('Username already exists.')
+        return value
+
+    def validate_email(self, value):
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError('Email already exists.')
+        return value
+
+    def save(self, vendor_user, tenant):
+        from django.db import transaction
+        from tenants.models import TenantMember
+        
+        with transaction.atomic():
+            # Create user
+            user = User.objects.create_user(
+                username=self.validated_data['username'],
+                email=self.validated_data['email'],
+                password=self.validated_data['password'],
+                first_name=self.validated_data.get('first_name', ''),
+                last_name=self.validated_data.get('last_name', ''),
+                role='customer',
+                is_email_verified=True,
+            )
+            
+            # Create profile with additional fields
+            profile = Profile.objects.create(
+                user=user,
+                phone=self.validated_data.get('phone', ''),
+                designation=self.validated_data.get('designation', '')
+            )
+            
+            # Add to tenant as employee
+            tenant_member = TenantMember.objects.create(
+                tenant=tenant,
+                user=user,
+                role=self.validated_data.get('role', 'staff'),
+                added_by=vendor_user,
+                is_active=True,
+            )
+            
+            return user, tenant_member
+
+
+class EmployeeListSerializer(serializers.ModelSerializer):
+    """
+    Serializer for listing employees
+    """
+    role = serializers.SerializerMethodField()
+    added_by = serializers.SerializerMethodField()
+    profile_avatar = serializers.SerializerMethodField()
+    phone = serializers.SerializerMethodField()
+    designation = serializers.SerializerMethodField()
+    full_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            'id', 'username', 'email', 'first_name', 'last_name', 'full_name',
+            'role', 'is_active', 'is_email_verified', 'profile_avatar', 
+            'date_joined', 'last_login', 'added_by', 'phone', 'designation'
+        ]
+
+    def get_full_name(self, obj):
+        return obj.get_full_name() or obj.username
+
+    def get_role(self, obj):
+        tenant = self.context.get('tenant')
+        if tenant:
+            from tenants.models import TenantMember
+            try:
+                member = TenantMember.objects.get(tenant=tenant, user=obj)
+                return member.role
+            except TenantMember.DoesNotExist:
+                return None
+        return None
+
+    def get_added_by(self, obj):
+        tenant = self.context.get('tenant')
+        if tenant:
+            from tenants.models import TenantMember
+            try:
+                member = TenantMember.objects.get(tenant=tenant, user=obj)
+                if member.added_by:
+                    return {
+                        'id': member.added_by.id,
+                        'username': member.added_by.username,
+                        'email': member.added_by.email,
+                    }
+            except TenantMember.DoesNotExist:
+                pass
+        return None
+
+    def get_profile_avatar(self, obj):
+        try:
+            return obj.profile.get_avatar_url()
+        except:
+            return None
+
+    def get_phone(self, obj):
+        try:
+            return obj.profile.phone
+        except:
+            return None
+
+    def get_designation(self, obj):
+        try:
+            return obj.profile.designation
+        except:
+            return None
+
+
+class EmployeeUpdateSerializer(serializers.Serializer):
+    """
+    Serializer for vendor to update employee details
+    """
+    first_name = serializers.CharField(required=False)
+    last_name = serializers.CharField(required=False)
+    role = serializers.ChoiceField(
+        choices=['manager', 'staff', 'viewer'],
+        required=False
+    )
+    is_active = serializers.BooleanField(required=False)
+    phone = serializers.CharField(required=False)
+    address = serializers.CharField(required=False)
+    city = serializers.CharField(required=False)
+    designation = serializers.CharField(required=False)
+    bio = serializers.CharField(required=False)
+
+
+class EmployeeBulkCreateSerializer(serializers.Serializer):
+    """
+    Serializer for bulk employee creation
+    """
+    employees = serializers.ListField(
+        child=EmployeeCreateSerializer(),
+        min_length=1,
+        max_length=50,
+        help_text="List of employees to create (max 50)"
+    )
+
+
+class EmployeeActivityLogSerializer(serializers.ModelSerializer):
+    """
+    Serializer for employee activity logs
+    """
+    employee_name = serializers.CharField(source='employee.username', read_only=True)
+    tenant_name = serializers.CharField(source='tenant.name', read_only=True)
+
+    class Meta:
+        from .models import EmployeeActivityLog
+        model = EmployeeActivityLog
+        fields = [
+            'id', 'employee', 'employee_name', 'tenant', 'tenant_name',
+            'action', 'resource_type', 'resource_id', 'details',
+            'ip_address', 'user_agent', 'created_at'
+        ]
+        read_only_fields = ['id', 'created_at']
+
+
+class EmployeeInvitationSerializer(serializers.ModelSerializer):
+    """
+    Serializer for employee invitations
+    """
+    invited_by_name = serializers.CharField(source='invited_by.username', read_only=True)
+    tenant_name = serializers.CharField(source='tenant.name', read_only=True)
+
+    class Meta:
+        from .models import EmployeeInvitation
+        model = EmployeeInvitation
+        fields = [
+            'id', 'email', 'tenant', 'tenant_name', 'invited_by', 'invited_by_name',
+            'role', 'token', 'status', 'created_at', 'expires_at', 'accepted_at'
+        ]
+        read_only_fields = ['id', 'token', 'created_at', 'expires_at']

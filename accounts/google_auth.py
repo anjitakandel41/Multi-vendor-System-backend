@@ -1,3 +1,4 @@
+# accounts/google_auth.py
 import requests
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -50,7 +51,7 @@ class GoogleAuthView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        try: # core of Google sign in 
+        try:
             response = requests.get(
                 'https://www.googleapis.com/oauth2/v3/userinfo',
                 params={'access_token': access_token},
