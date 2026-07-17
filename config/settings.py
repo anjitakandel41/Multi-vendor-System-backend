@@ -37,6 +37,8 @@ ALLOWED_HOSTS = [
     ".railway.app", # Any subdomain of railway.app
     ".up.railway.app",  ### Add Railway default domain
     "192.168.18.227",
+    "192.168.18.220",
+    "192.168.18.224",
     "192.168.18.221",
 ]
 
@@ -48,6 +50,8 @@ CSRF_TRUSTED_ORIGINS = [
     "https://*.railway.app",
     "https://*.up.railway.app",
 ]
+
+
 
 # CORS Settings (Updated)
 # Allow all origins in development, restrict in production
@@ -133,10 +137,14 @@ else:
     EMAIL_USE_TLS = True
     EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
     EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
+
+    SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", EMAIL_HOST_USER)
+    DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 # Frontend/Backend URL for email links
 FRONTEND_URL = os.getenv(
     'FRONTEND_URL',
-    'https://inventorymanagement-api-production.up.railway.app'
+    # 'https://inventorymanagement-api-production.up.railway.app'
+    "http://127.0.0.1:8000",
 )
 
 INSTALLED_APPS = [
@@ -173,6 +181,7 @@ INSTALLED_APPS = [
     "notifications",
     "cart",
     "payment",
+    "contact",
 ]
 
 # MIDDLEWARE list of middleware components (process requests/responses in order)
@@ -224,6 +233,9 @@ if DATABASE_URL:
             DATABASE_URL,
             conn_max_age=0,   # Neon serverless: don't reuse connections across requests
             ssl_require=True, # Neon requires SSL — already in URL but this is a safety net
+            disable_server_side_cursors=True,
+            
+
             
         )
     }
