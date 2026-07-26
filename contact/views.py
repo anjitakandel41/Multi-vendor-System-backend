@@ -10,7 +10,6 @@ from rest_framework.views import APIView
 
 from .serializers import ContactMessageSerializer
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -44,15 +43,17 @@ class ContactMessageAPIView(APIView):
         support_email_sent = False
         customer_email_sent = False
 
+        # Send email to support team
         try:
             send_mail(
-                subject=f"New contact message: {contact_message.subject}",
+                subject=f"New Contact Message: {contact_message.subject}",
                 message=(
-                    "A new contact form message was submitted.\n\n"
+                    "A new contact form message has been submitted.\n\n"
                     f"Name: {full_name}\n"
                     f"Email: {contact_message.email}\n"
                     f"Subject: {contact_message.subject}\n\n"
-                    f"Message:\n{contact_message.message}\n"
+                    "Message:\n"
+                    f"{contact_message.message}\n"
                 ),
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[settings.SUPPORT_EMAIL],
@@ -62,20 +63,21 @@ class ContactMessageAPIView(APIView):
 
         except Exception as exc:
             logger.exception(
-                "Could not send contact message to support: %s",
+                "Failed to send support email: %s",
                 exc,
             )
 
+        # Send confirmation email to customer
         try:
             send_mail(
-                subject="We received your message",
+                subject="We Received Your Message",
                 message=(
                     f"Hello {contact_message.first_name},\n\n"
                     "Thank you for contacting us.\n\n"
-                    "We have received your message and will respond "
-                    "as soon as possible.\n\n"
+                    "We have successfully received your message and "
+                    "our support team will get back to you as soon as possible.\n\n"
                     f"Subject: {contact_message.subject}\n\n"
-                    "Regards,\n"
+                    "Best regards,\n"
                     "Support Team"
                 ),
                 from_email=settings.DEFAULT_FROM_EMAIL,
@@ -86,7 +88,7 @@ class ContactMessageAPIView(APIView):
 
         except Exception as exc:
             logger.exception(
-                "Could not send contact confirmation email: %s",
+                "Failed to send confirmation email: %s",
                 exc,
             )
 
