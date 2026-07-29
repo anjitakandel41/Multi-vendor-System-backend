@@ -1,4 +1,3 @@
-
 # orders/admin.py
 
 from django.contrib import admin
@@ -28,6 +27,9 @@ class OrderAdmin(admin.ModelAdmin):
         'status',
         'payment_status',
         'total_price',
+        'cancellation_reason_display',
+        'cancelled_by',
+        'cancelled_at',
         'created_at',
     ]
     list_filter = [
@@ -35,12 +37,16 @@ class OrderAdmin(admin.ModelAdmin):
         'payment_status',
         'payment_method',
         'created_at',
+        'cancellation_reason',
+        'inventory_restored',
     ]
     search_fields = [
         'customer_name',
         'user__username',
         'user__email',
         'payment_transaction_id',
+        'cancellation_reason',
+        'cancellation_details',
     ]
     ordering = [
         '-created_at',
@@ -52,7 +58,11 @@ class OrderAdmin(admin.ModelAdmin):
         'processed_at', 
         'shipped_at', 
         'completed_at', 
-        'cancelled_at'
+        'cancelled_at',
+        'cancellation_reason',
+        'cancellation_details',
+        'cancelled_by',
+        'inventory_restored',
     ]
     
     fieldsets = (
@@ -68,6 +78,11 @@ class OrderAdmin(admin.ModelAdmin):
         ('Order Status', {
             'fields': ('status', 'processed_at', 'shipped_at', 'completed_at', 'cancelled_at')
         }),
+        ('Cancellation Information', {
+            'fields': ('cancellation_reason', 'cancellation_details', 'cancelled_by', 'inventory_restored'),
+            'classes': ('collapse',),  # Collapsible section
+            'description': 'Information about order cancellation (if applicable)'
+        }),
         ('Timestamps', {
             'fields': ('created_at', 'updated_at')
         }),
@@ -76,6 +91,36 @@ class OrderAdmin(admin.ModelAdmin):
     inlines = [
         OrderItemInline,
     ]
+    
+    def cancellation_reason_display(self, obj):
+        """Display the cancellation reason with its label."""
+        if obj.cancellation_reason:
+            return obj.get_cancellation_reason_display()
+        return "-"
+    cancellation_reason_display.short_description = 'Cancellation Reason'
+    cancellation_reason_display.admin_order_field = 'cancellation_reason'
+    
+    def get_readonly_fields(self, request, obj=None):
+        """Make cancellation fields readonly in admin."""
+        readonly = super().get_readonly_fields(request, obj)
+        # If the order is cancelled, make cancellation fields readonly
+        if obj and obj.status == Order.STATUS_CANCELLED:
+            return readonly
+        return readonly
+    
+    def get_fieldsets(self, request, obj=None):
+        """Customize fieldsets based on order status."""
+        fieldsets = super().get_fieldsets(request, obj)
+        
+        # If order is not cancelled, hide cancellation fields
+        if obj and obj.status != Order.STATUS_CANCELLED:
+            # Remove the cancellation section
+            fieldsets = [
+                fieldset for fieldset in fieldsets 
+                if fieldset[0] != 'Cancellation Information'
+            ]
+        
+        return fieldsets
 
 
 @admin.register(OrderItem)
