@@ -3,6 +3,7 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.utils import timezone
+from django.core.exceptions import ValidationError
 from .models import Order, OrderItem, OrderPrescription, Delivery  # Removed Payment
 from products.models import Product
 from coupons.models import Coupon
@@ -129,12 +130,19 @@ class OrderSerializer(serializers.ModelSerializer):
             'processed_at',
             'shipped_at',
             'completed_at',
-            'cancelled_at'
+            'cancelled_at',
+            # Cancellation fields
+            'cancellation_reason',
+            'cancellation_details',
+            'cancelled_by',
+            'inventory_restored',
         ]
         read_only_fields = [
             'id', 'created_at', 'updated_at', 
             'user', 'tenant', 'paid_at', 'processed_at', 
-            'shipped_at', 'completed_at', 'cancelled_at'
+            'shipped_at', 'completed_at', 'cancelled_at',
+            'cancellation_reason', 'cancellation_details',
+            'cancelled_by', 'inventory_restored'
         ]
     
     def get_user_full_name(self, obj):
@@ -244,7 +252,12 @@ class OrderCustomerSerializer(OrderSerializer):
             'processed_at',
             'shipped_at',
             'completed_at',
-            'cancelled_at'
+            'cancelled_at',
+            # Cancellation fields
+            'cancellation_reason',
+            'cancellation_details',
+            'cancelled_by',
+            'inventory_restored',
         ]
 
 
@@ -372,6 +385,61 @@ class OrderCreateSerializer(serializers.Serializer):
         data['total_price'] = final_total
         
         return data
+
+
+class OrderCancelSerializer(serializers.Serializer):
+    """
+    Serializer for cancelling an order with reason.
+    """
+    reason = serializers.ChoiceField(
+        choices=Order.CANCELLATION_REASON_CHOICES,
+        required=True,
+        error_messages={
+            'required': 'Cancellation reason is required.',
+            'invalid_choice': 'Invalid cancellation reason.'
+        }
+    )
+    details = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        help_text="Additional details required when reason is 'Other'"
+    )
+    
+    def validate(self, data):
+        """
+        Validate that details are provided when reason is 'Other'.
+        """
+        reason = data.get('reason')
+        details = data.get('details', '')
+        
+        if reason == Order.CANCELLATION_REASON_OTHER:
+            # Check if details is None, empty string, or only whitespace
+            if not details or not details.strip():
+                raise serializers.ValidationError({
+                    'details': 'Cancellation details are required when the reason is Other.'
+                })
+            # Store cleaned details
+            data['details'] = details.strip()
+        else:
+            # For other reasons, details can be None or empty
+            if details:
+                data['details'] = details.strip()
+            else:
+                data['details'] = ''
+        
+        return data
+    
+    def validate_reason(self, value):
+        """
+        Validate that the reason is valid.
+        """
+        valid_reasons = [choice[0] for choice in Order.CANCELLATION_REASON_CHOICES]
+        if value not in valid_reasons:
+            raise serializers.ValidationError(
+                f"Invalid cancellation reason. Must be one of: {', '.join(valid_reasons)}"
+            )
+        return value
 
 
 class PrescriptionUploadSerializer(serializers.Serializer):

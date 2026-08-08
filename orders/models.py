@@ -4,10 +4,11 @@ from django.db import models
 from django.conf import settings
 from django.utils import timezone
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.core.exceptions import ValidationError
 from decimal import Decimal
 
 from products.models import Product
-from inventory.models import Warehouse
+from warehouses.models import Warehouse  # Changed from inventory.models
 from tenants.models import Tenant
 
 
@@ -52,6 +53,41 @@ class Order(models.Model):
         (PAYMENT_STATUS_PAID, 'Paid'),
         (PAYMENT_STATUS_FAILED, 'Failed'),
         (PAYMENT_STATUS_REFUNDED, 'Refunded'),
+    ]
+    
+    # Cancellation reason choices
+    CANCELLATION_REASON_ORDERED_BY_MISTAKE = "ordered_by_mistake"
+    CANCELLATION_REASON_WRONG_ADDRESS = "wrong_address"
+    CANCELLATION_REASON_WRONG_PRODUCT = "wrong_product"
+    CANCELLATION_REASON_NO_LONGER_NEEDED = "no_longer_needed"
+    CANCELLATION_REASON_FOUND_BETTER_PRICE = "found_better_price"
+    CANCELLATION_REASON_OTHER = "other"
+    
+    CANCELLATION_REASON_CHOICES = [
+        (
+            CANCELLATION_REASON_ORDERED_BY_MISTAKE,
+            "Ordered by mistake",
+        ),
+        (
+            CANCELLATION_REASON_WRONG_ADDRESS,
+            "Wrong delivery address",
+        ),
+        (
+            CANCELLATION_REASON_WRONG_PRODUCT,
+            "Selected the wrong product",
+        ),
+        (
+            CANCELLATION_REASON_NO_LONGER_NEEDED,
+            "Product is no longer needed",
+        ),
+        (
+            CANCELLATION_REASON_FOUND_BETTER_PRICE,
+            "Found a better price",
+        ),
+        (
+            CANCELLATION_REASON_OTHER,
+            "Other",
+        ),
     ]
     
     # Fields
@@ -116,6 +152,31 @@ class Order(models.Model):
     )
     notes = models.TextField(blank=True)
     
+    # Cancellation fields
+    cancellation_reason = models.CharField(
+        max_length=50,
+        choices=CANCELLATION_REASON_CHOICES,
+        null=True,
+        blank=True,
+    )
+    cancellation_details = models.TextField(
+        blank=True,
+        help_text=(
+            "Additional explanation required when "
+            "the cancellation reason is Other."
+        ),
+    )
+    cancelled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="cancelled_orders",
+    )
+    inventory_restored = models.BooleanField(
+        default=False,
+    )
+    
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -135,6 +196,86 @@ class Order(models.Model):
     
     def __str__(self):
         return f"Order #{self.id} - {self.customer_name}"
+    
+    def clean(self):
+        super().clean()
+        
+        errors = {}
+        
+        if self.status == self.STATUS_CANCELLED:
+            if not self.cancellation_reason:
+                errors["cancellation_reason"] = (
+                    "A cancellation reason is required."
+                )
+            
+            if (
+                self.cancellation_reason
+                == self.CANCELLATION_REASON_OTHER
+                and not self.cancellation_details.strip()
+            ):
+                errors["cancellation_details"] = (
+                    "Please provide cancellation details."
+                )
+        
+        if errors:
+            raise ValidationError(errors)
+    
+    def cancel(self, cancelled_by, reason, details=""):
+        if not self.can_cancel:
+            raise ValidationError(
+                {
+                    "status": (
+                        "Only pending or processing orders "
+                        "can be cancelled."
+                    )
+                }
+            )
+        
+        valid_reasons = {
+            choice[0]
+            for choice in self.CANCELLATION_REASON_CHOICES
+        }
+        
+        if reason not in valid_reasons:
+            raise ValidationError(
+                {
+                    "cancellation_reason": (
+                        "Invalid cancellation reason."
+                    )
+                }
+            )
+        
+        details = details.strip()
+        
+        if (
+            reason == self.CANCELLATION_REASON_OTHER
+            and not details
+        ):
+            raise ValidationError(
+                {
+                    "cancellation_details": (
+                        "Cancellation details are required "
+                        "when the reason is Other."
+                    )
+                }
+            )
+        
+        self.status = self.STATUS_CANCELLED
+        self.cancellation_reason = reason
+        self.cancellation_details = details
+        self.cancelled_by = cancelled_by
+        self.cancelled_at = timezone.now()
+        
+        self.save(
+            update_fields=[
+                "status",
+                "cancellation_reason",
+                "cancellation_details",
+                "cancelled_by",
+                "cancelled_at",
+                "updated_at",
+            ]
+        )
     
     @property
     def is_paid(self):

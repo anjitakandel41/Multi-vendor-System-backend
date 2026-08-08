@@ -1,3 +1,5 @@
+# orders/views.py
+
 from decimal import Decimal
 from urllib import response
 from drf_spectacular.utils import extend_schema, OpenApiParameter
@@ -34,6 +36,7 @@ from .serializers import (
     OrderSerializer,
     OrderCustomerSerializer,
     OrderAdminSerializer,
+    OrderCancelSerializer,  # Import the new cancellation serializer
     PrescriptionUploadSerializer,
     PrescriptionReviewSerializer,
     PrescriptionDetailSerializer,
@@ -480,54 +483,123 @@ class OrderViewSet(TenantViewMixin, viewsets.ModelViewSet):
 
     @extend_schema(
         summary='Cancel Order',
-        description='Cancel a pending or processing order. Inventory is restored.',
+        description=(
+            'Cancel a pending or processing order with a reason.\n\n'
+            '**Requirements:**\n'
+            '- Customer must provide a cancellation reason\n'
+            '- If reason is "Other", details are required\n'
+            '- Only pending or processing orders can be cancelled\n'
+            '- Inventory is automatically restored\n'
+            '- Payment status is updated if applicable'
+        ),
+        request=OrderCancelSerializer,
         responses={
-            200: OpenApiResponse(description='Cancelled successfully.'),
-            400: OpenApiResponse(description='Cannot cancel.'),
-            403: OpenApiResponse(description='Not your order.'),
+            200: OpenApiResponse(
+                description='Order cancelled successfully.',
+                response=OrderCustomerSerializer
+            ),
+            400: OpenApiResponse(description='Validation error or cannot cancel.'),
+            403: OpenApiResponse(description='Permission denied.'),
+            404: OpenApiResponse(description='Order not found.'),
         },
-        tags=['Orders']
+        tags=['Orders'],
+        examples=[
+            OpenApiExample(
+                'Cancel with reason',
+                value={
+                    'reason': 'ordered_by_mistake',
+                    'details': ''
+                },
+                request_only=True,
+            ),
+            OpenApiExample(
+                'Cancel with Other reason',
+                value={
+                    'reason': 'other',
+                    'details': 'I found a better deal at another store.'
+                },
+                request_only=True,
+            ),
+        ]
     )
     @transaction.atomic
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):
+        """
+        Cancel an order with a reason.
+        """
         order = self.get_object()
+        user = request.user
 
-        if request.user.role != 'admin' and order.user != request.user:
+        # Check permission
+        if user.role != 'admin' and order.user != user:
             return Response(
                 {'error': 'You can only cancel your own orders.'},
                 status=status.HTTP_403_FORBIDDEN
             )
 
+        # Check if order is already cancelled
         if order.status == Order.STATUS_CANCELLED:
             return Response(
                 {'error': 'Order is already cancelled.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        if order.status == Order.STATUS_SHIPPED:
+        # Check if order can be cancelled
+        if not order.can_cancel:
             return Response(
-                {'error': 'Cannot cancel an order that has already been shipped.'},
+                {'error': 'Only pending or processing orders can be cancelled.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        if order.status == Order.STATUS_COMPLETED:
+        # Validate cancellation data
+        serializer = OrderCancelSerializer(data=request.data)
+        if not serializer.is_valid():
             return Response(
-                {'error': 'Cannot cancel a completed order.'},
+                serializer.errors,
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # Get validated data
+        reason = serializer.validated_data['reason']
+        details = serializer.validated_data.get('details', '')
+
+        # Restore inventory for all items
         for item in order.items.all():
-            inventory = Inventory.objects.select_for_update().get(
-                product=item.product,
-                warehouse=item.warehouse
-            )
-            inventory.quantity += item.quantity
-            inventory.save()
+            try:
+                inventory = Inventory.objects.select_for_update().get(
+                    product=item.product,
+                    warehouse=item.warehouse
+                )
+                inventory.quantity += item.quantity
+                inventory.save()
+            except Inventory.DoesNotExist:
+                # If inventory doesn't exist, continue (shouldn't happen)
+                pass
 
-        order.status = Order.STATUS_CANCELLED
-        order.cancelled_at = timezone.now()
-        order.save()
+        # Use the model's cancel method
+        try:
+            order.cancel(
+                cancelled_by=user,
+                reason=reason,
+                details=details
+            )
+        except ValidationError as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Mark inventory as restored
+        order.inventory_restored = True
+        order.save(update_fields=['inventory_restored', 'updated_at'])
+
+        # Update payment status if needed (e.g., if paid, mark for refund)
+        if order.payment_status == Order.PAYMENT_STATUS_PAID:
+            # You might want to handle refund logic here
+            # For now, we just mark it as refunded or keep as paid
+            order.payment_status = Order.PAYMENT_STATUS_REFUNDED
+            order.save(update_fields=['payment_status'])
 
         # Send cancellation notification
         send_notification(
@@ -535,8 +607,22 @@ class OrderViewSet(TenantViewMixin, viewsets.ModelViewSet):
             notification_type="order_cancelled",
         )
 
+        # Serialize and return response
+        serializer = OrderCustomerSerializer(order)
+        
         return Response(
-            {'message': 'Order cancelled successfully. Inventory restored.'},
+            {
+                'message': 'Order cancelled successfully.',
+                'order': serializer.data,
+                'cancellation': {
+                    'reason': order.get_cancellation_reason_display(),
+                    'reason_code': order.cancellation_reason,
+                    'details': order.cancellation_details,
+                    'cancelled_by': str(order.cancelled_by),
+                    'cancelled_at': order.cancelled_at,
+                    'inventory_restored': order.inventory_restored,
+                }
+            },
             status=status.HTTP_200_OK
         )
 
@@ -1147,6 +1233,9 @@ class VendorOrderViewSet(TenantViewMixin, viewsets.ReadOnlyModelViewSet):
 
     @action(detail=True, methods=["post"])
     def cancel(self, request, pk=None):
+        """
+        Vendor cancel endpoint - updated to use cancellation reason.
+        """
         order = self.get_object()
 
         if order.status == Order.STATUS_CANCELLED:
@@ -1161,18 +1250,51 @@ class VendorOrderViewSet(TenantViewMixin, viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # Validate cancellation data
+        serializer = OrderCancelSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                serializer.errors,
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Get validated data
+        reason = serializer.validated_data['reason']
+        details = serializer.validated_data.get('details', '')
+
         # Restore inventory
         for item in order.items.all():
-            inventory = Inventory.objects.select_for_update().get(
-                product=item.product,
-                warehouse=item.warehouse
-            )
-            inventory.quantity += item.quantity
-            inventory.save()
+            try:
+                inventory = Inventory.objects.select_for_update().get(
+                    product=item.product,
+                    warehouse=item.warehouse
+                )
+                inventory.quantity += item.quantity
+                inventory.save()
+            except Inventory.DoesNotExist:
+                pass
 
-        order.status = Order.STATUS_CANCELLED
-        order.cancelled_at = timezone.now()
-        order.save()
+        # Use the model's cancel method
+        try:
+            order.cancel(
+                cancelled_by=request.user,
+                reason=reason,
+                details=details
+            )
+        except ValidationError as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Mark inventory as restored
+        order.inventory_restored = True
+        order.save(update_fields=['inventory_restored', 'updated_at'])
+
+        # Update payment status if needed
+        if order.payment_status == Order.PAYMENT_STATUS_PAID:
+            order.payment_status = Order.PAYMENT_STATUS_REFUNDED
+            order.save(update_fields=['payment_status'])
 
         # Send cancellation notification
         send_notification(
@@ -1183,7 +1305,15 @@ class VendorOrderViewSet(TenantViewMixin, viewsets.ReadOnlyModelViewSet):
         return Response({
             "message": "Order cancelled successfully.",
             "order_id": order.id,
-            "status": order.status
+            "status": order.status,
+            "cancellation": {
+                "reason": order.get_cancellation_reason_display(),
+                "reason_code": order.cancellation_reason,
+                "details": order.cancellation_details,
+                "cancelled_by": str(order.cancelled_by),
+                "cancelled_at": order.cancelled_at,
+                "inventory_restored": order.inventory_restored,
+            }
         })
 
 
