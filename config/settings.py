@@ -47,8 +47,11 @@ CSRF_TRUSTED_ORIGINS = [
     "https://*.up.railway.app",
 ]
 
-# CORS Settings
-CORS_ALLOW_ALL_ORIGINS = DEBUG
+
+
+# CORS Settings (Updated)
+# Allow all origins in development, restrict in production
+CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only allow all in debug mode
 
 if not DEBUG:
     cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "")
@@ -148,7 +151,8 @@ SITE_NAME = os.getenv('SITE_NAME', 'Inventory Management System')
 # Frontend/Backend URL for email links
 FRONTEND_URL = os.getenv(
     'FRONTEND_URL',
-    'https://inventorymanagement-api-production.up.railway.app'
+    # 'https://inventorymanagement-api-production.up.railway.app'
+    "http://127.0.0.1:8000",
 )
 
 # Password Reset Settings
@@ -237,8 +241,12 @@ if DATABASE_URL:
     DATABASES = {
         "default": dj_database_url.parse(
             DATABASE_URL,
-            conn_max_age=0,
-            ssl_require=True,
+            conn_max_age=0,   # Neon serverless: don't reuse connections across requests
+            ssl_require=True, # Neon requires SSL — already in URL but this is a safety net
+            disable_server_side_cursors=True,
+            
+
+            
         )
     }
 else:
