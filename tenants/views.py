@@ -24,12 +24,12 @@ class TenantViewSet(viewsets.ModelViewSet):
 
     Filter pending stores: GET /api/tenants/?is_active=false
     """
-    queryset         = Tenant.objects.select_related('owner').order_by('name')
+    queryset = Tenant.objects.select_related('owner').order_by('name')
     serializer_class = TenantSerializer
-    filter_backends  = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['is_active']
-    search_fields    = ['name', 'slug', 'owner__username', 'owner__email']
-    ordering_fields  = ['name', 'created_at']
+    search_fields = ['name', 'slug', 'owner__username', 'owner__email']
+    ordering_fields = ['name', 'created_at']
 
     def get_permissions(self):
         if self.action == 'me':
@@ -132,7 +132,7 @@ class TenantViewSet(viewsets.ModelViewSet):
             {
                 'detail': f'Store "{tenant.name}" has been approved and is now active.',
                 'store': {
-                    'id':   tenant.id,
+                    'id': tenant.id,
                     'name': tenant.name,
                     'slug': tenant.slug,
                 },
@@ -168,7 +168,7 @@ class TenantViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         owner_username = tenant.owner.username
-        store_name     = tenant.name
+        store_name = tenant.name
         tenant.delete()
         return Response(
             {

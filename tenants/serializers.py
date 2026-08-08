@@ -10,10 +10,10 @@ User = get_user_model()
 class TenantSerializer(serializers.ModelSerializer):
 
     owner_username = serializers.CharField(source='owner.username', read_only=True)
-    owner_email    = serializers.CharField(source='owner.email',    read_only=True)
+    owner_email = serializers.CharField(source='owner.email', read_only=True)
 
     class Meta:
-        model  = Tenant
+        model = Tenant
         fields = [
             'id',
             'name',
@@ -36,7 +36,7 @@ class TenantMemberSerializer(serializers.ModelSerializer):
     Update: only 'role' and 'is_active' can be changed.
     """
     username = serializers.CharField(source='user.username', read_only=True)
-    email    = serializers.CharField(source='user.email',    read_only=True)
+    email = serializers.CharField(source='user.email', read_only=True)
     add_user = serializers.CharField(
         write_only=True,
         required=False,
@@ -44,7 +44,7 @@ class TenantMemberSerializer(serializers.ModelSerializer):
     )
 
     class Meta:
-        model  = TenantMember
+        model = TenantMember
         fields = ['id', 'add_user', 'username', 'email', 'role', 'is_active', 'created_at']
         read_only_fields = ['id', 'username', 'email', 'created_at']
 
@@ -60,7 +60,7 @@ class TenantMemberSerializer(serializers.ModelSerializer):
         return data
 
     def create(self, validated_data):
-        user   = validated_data.pop('add_user')
+        user = validated_data.pop('add_user')
         tenant = self.context['tenant']
 
         if tenant.owner == user:
@@ -70,13 +70,13 @@ class TenantMemberSerializer(serializers.ModelSerializer):
             tenant=tenant,
             user=user,
             defaults={
-                'role':      validated_data.get('role', TenantMember.ROLE_STAFF),
+                'role': validated_data.get('role', TenantMember.ROLE_STAFF),
                 'is_active': True,
             }
         )
         if not created:
             # Reactivate a previously removed member
-            member.role      = validated_data.get('role', member.role)
+            member.role = validated_data.get('role', member.role)
             member.is_active = True
             member.save()
         return member
@@ -92,8 +92,8 @@ class TenantLoginSerializer(serializers.Serializer):
     The client should store tenant_slug and send it as the
     X-Tenant-Slug header on all subsequent store requests.
     """
-    username    = serializers.CharField()
-    password    = serializers.CharField(write_only=True)
+    username = serializers.CharField()
+    password = serializers.CharField(write_only=True)
     tenant_slug = serializers.SlugField(
         help_text='Slug of the store to log in to (e.g. techmart).'
     )
@@ -135,18 +135,18 @@ class TenantLoginSerializer(serializers.Serializer):
         refresh = RefreshToken.for_user(user)
         return {
             'refresh': str(refresh),
-            'access':  str(refresh.access_token),
+            'access': str(refresh.access_token),
             'user': {
-                'id':       user.id,
+                'id': user.id,
                 'username': user.username,
-                'email':    user.email,
-                'role':     user.role,
+                'email': user.email,
+                'role': user.role,
             },
             'tenant': {
-                'id':   tenant.id,
+                'id': tenant.id,
                 'name': tenant.name,
                 'slug': tenant.slug,
             },
             'tenant_role': tenant_role,
-            'next_step':   f'Set header  X-Tenant-Slug: {tenant.slug}  on all store requests.',
+            'next_step': f'Set header  X-Tenant-Slug: {tenant.slug}  on all store requests.',
         }
