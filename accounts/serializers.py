@@ -59,7 +59,7 @@ class RegisterSerializer(serializers.ModelSerializer):
                 email=validated_data["email"],
                 password=validated_data["password"],
                 role="customer",
-                is_email_verified=False,
+                is_email_verified=True,
             )
             Profile.objects.get_or_create(user=user)
 
@@ -81,16 +81,6 @@ class LoginSerializer(serializers.Serializer):
 
         if not user.is_active:
             raise serializers.ValidationError("This account is inactive.")
-
-        if not user.is_email_verified:
-            raise serializers.ValidationError(
-                {
-                    "email": (
-                        "Please verify your email address before logging in. "
-                        "Check your inbox for the verification link."
-                    )
-                }
-            )
 
         refresh = RefreshToken.for_user(user)
         response = {
@@ -165,16 +155,6 @@ class AdminLoginSerializer(serializers.Serializer):
 
         if user.role != "admin":
             raise serializers.ValidationError("Admin access only.")
-
-        if not user.is_email_verified:
-            raise serializers.ValidationError(
-                {
-                    "email": (
-                        "Please verify your email address before logging in. "
-                        "Check your inbox for the verification link."
-                    )
-                }
-            )
 
         refresh = RefreshToken.for_user(user)
         response = {
@@ -364,7 +344,7 @@ class VendorRegisterSerializer(serializers.Serializer):
                 email=validated_data["email"],
                 password=validated_data["password"],
                 role="admin",
-                is_email_verified=False,
+                is_email_verified=True,
             )
             Profile.objects.get_or_create(user=user)
 
@@ -399,16 +379,6 @@ class VendorLoginSerializer(serializers.Serializer):
         if not user.is_active:
             raise serializers.ValidationError(
                 {"username": "This account is inactive."}
-            )
-
-        if not user.is_email_verified:
-            raise serializers.ValidationError(
-                {
-                    "email": (
-                        "Please verify your email address before logging in. "
-                        "Check your inbox for the verification link."
-                    )
-                }
             )
 
         if user.role != "admin":
@@ -484,16 +454,6 @@ class EmployeeLoginSerializer(serializers.Serializer):
         if not user.is_active:
             raise serializers.ValidationError(
                 {"username": "This account is inactive."}
-            )
-
-        if not user.is_email_verified:
-            raise serializers.ValidationError(
-                {
-                    "email": (
-                        "Please verify your email address before logging in. "
-                        "Check your inbox for the verification link."
-                    )
-                }
             )
 
         from tenants.models import Tenant, TenantMember

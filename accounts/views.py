@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.conf import settings
 from rest_framework import generics, status
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -9,7 +10,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 
-from .emails import send_verification_email
+from .emails import send_password_reset_email
 from .models import Profile
 from .serializers import (
     AdminLoginSerializer,
@@ -35,14 +36,13 @@ User = get_user_model()
     summary="Vendor / Store Owner Registration",
     description=(
         "Register as a new vendor. Creates your personal account and store in one step. "
-        "You must verify your email, and your store must be approved by a platform admin "
-        "before you can log in."
+        "Your store must be approved by a platform admin before you can log in."
     ),
     request=VendorRegisterSerializer,
     responses={
         201: OpenApiResponse(
             description=(
-                "Registration submitted. Verification email sent and store pending approval."
+                "Registration submitted. Your store is pending approval."
             )
         ),
         400: OpenApiResponse(
@@ -59,14 +59,10 @@ class VendorRegisterView(APIView):
         serializer.is_valid(raise_exception=True)
         user, tenant = serializer.save()
 
-        token = generate_token(user.id, "email_verification")
-        send_verification_email(user, token)
-
         return Response(
             {
                 "message": (
-                    "Registration submitted successfully. Please check your email "
-                    "and verify your account. Your store is pending platform admin approval."
+                    "Registration submitted successfully. Your store is pending platform admin approval."
                 ),
                 "user": {
                     "id": user.id,
@@ -80,9 +76,8 @@ class VendorRegisterView(APIView):
                     "status": "pending_approval",
                 },
                 "next_step": (
-                    "Verify your email using the link sent to your inbox. "
-                    "A platform admin must also activate your store. "
-                    "After both steps are complete, use POST /api/auth/vendor/login/."
+                    "A platform admin must approve your store before you can log in. "
+                    "After approval, submit POST /api/auth/vendor/login/."
                 ),
             },
             status=status.HTTP_201_CREATED,
@@ -92,10 +87,10 @@ class VendorRegisterView(APIView):
 @extend_schema(
     tags=["auth"],
     summary="Customer Registration",
-    description="Register a customer account and send an email verification link.",
+    description="Register a customer account.",
     request=RegisterSerializer,
     responses={
-        201: OpenApiResponse(description="Registration successful. Verification email sent."),
+        201: OpenApiResponse(description="Registration successful."),
         400: OpenApiResponse(description="Validation error."),
     },
 )
@@ -108,15 +103,9 @@ class RegisterView(generics.CreateAPIView):
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
 
-        token = generate_token(user.id, "email_verification")
-        send_verification_email(user, token)
-
         return Response(
             {
-                "message": (
-                    "Registration successful. "
-                    "Please check your email to verify your account."
-                ),
+                "message": "Registration successful.",
                 "email": user.email,
             },
             status=status.HTTP_201_CREATED,
@@ -311,10 +300,10 @@ class ForgotPasswordView(APIView):
 
     @extend_schema(
         summary="Forgot Password",
-        description="Password reset is currently disabled; contact the administrator.",
+        description="Send a password reset link to the configured email for the requested account.",
         request=ForgotPasswordSerializer,
         responses={
-            200: OpenApiResponse(description="Password reset assistance message returned."),
+            200: OpenApiResponse(description="Password reset email sent if the account exists."),
         },
         tags=["auth"],
     )
@@ -323,11 +312,17 @@ class ForgotPasswordView(APIView):
         serializer.is_valid(raise_exception=True)
         email = serializer.validated_data["email"]
 
+        try:
+            user = User.objects.get(email__iexact=email)
+            token = generate_token(user.id, "reset_password")
+            send_password_reset_email(user, token)
+        except User.DoesNotExist:
+            pass
+
         return Response(
             {
                 "message": (
-                    "Password reset functionality is currently disabled. "
-                    "Please contact admin at grgpurnima27@gmail.com for assistance."
+                    "If an account with this email exists, a password reset link has been sent."
                 ),
                 "email": email,
             },
@@ -341,11 +336,11 @@ class ResetPasswordView(APIView):
 
     @extend_schema(
         summary="Reset Password",
-        description="Password reset is currently disabled.",
+        description="Reset a user's password using a valid reset token.",
         request=ResetPasswordSerializer,
         responses={
-            200: OpenApiResponse(description="Password reset assistance message returned."),
-            400: OpenApiResponse(description="Invalid request."),
+            200: OpenApiResponse(description="Password reset successfully."),
+            400: OpenApiResponse(description="Invalid or expired password reset token."),
         },
         tags=["auth"],
     )
@@ -353,13 +348,35 @@ class ResetPasswordView(APIView):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
 
+        user_id = verify_token(
+            token,
+            "reset_password",
+            max_age_seconds=settings.PASSWORD_RESET_TOKEN_EXPIRY_DAYS * 86400,
+        )
+
+        if not user_id:
+            return Response(
+                {
+                    "message": "Password reset token is invalid or has expired."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response(
+                {
+                    "message": "Password reset token is invalid or has expired."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user.set_password(serializer.validated_data["password"])
+        user.save(update_fields=["password"])
+
         return Response(
-            {
-                "message": (
-                    "Password reset functionality is currently disabled. "
-                    "Please contact admin for assistance."
-                )
-            },
+            {"message": "Password has been reset successfully. You can now log in."},
             status=status.HTTP_200_OK,
         )
 
