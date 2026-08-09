@@ -31,16 +31,17 @@ class TenantSerializer(serializers.ModelSerializer):
 
 class TenantMemberSerializer(serializers.ModelSerializer):
     """
-    Read: returns the member's username, email, role, and status.
-    Create: accepts 'add_user' (username string) + role.
-    Update: only 'role' and 'is_active' can be changed.
+    Serializer for store team members.
+    - Read: Returns username, email, role, and status
+    - Create: Accepts 'add_user' (username) + role
+    - Update: Allows modifying 'role' and 'is_active'
     """
     username = serializers.CharField(source='user.username', read_only=True)
     email = serializers.CharField(source='user.email', read_only=True)
     add_user = serializers.CharField(
         write_only=True,
         required=False,
-        help_text='Username of the user to add as a store member.',
+        help_text='Username of the user to add as a team member.',
     )
 
     class Meta:
@@ -52,11 +53,11 @@ class TenantMemberSerializer(serializers.ModelSerializer):
         try:
             return User.objects.get(username=value)
         except User.DoesNotExist:
-            raise serializers.ValidationError(f'User "{value}" not found.')
+            raise serializers.ValidationError(f'No user found with username "{value}".')
 
     def validate(self, data):
         if self.instance is None and 'add_user' not in data:
-            raise serializers.ValidationError({'add_user': 'Required when adding a member.'})
+            raise serializers.ValidationError({'add_user': 'This field is required when adding a new member.'})
         return data
 
     def create(self, validated_data):
@@ -64,7 +65,7 @@ class TenantMemberSerializer(serializers.ModelSerializer):
         tenant = self.context['tenant']
 
         if tenant.owner == user:
-            raise serializers.ValidationError({'add_user': 'This user is already the store owner.'})
+            raise serializers.ValidationError({'add_user': 'User is already the store owner.'})
 
         member, created = TenantMember.objects.get_or_create(
             tenant=tenant,
@@ -75,7 +76,7 @@ class TenantMemberSerializer(serializers.ModelSerializer):
             }
         )
         if not created:
-            # Reactivate a previously removed member
+            # Reactivate an existing member if they were previously deactivated
             member.role = validated_data.get('role', member.role)
             member.is_active = True
             member.save()
@@ -84,33 +85,33 @@ class TenantMemberSerializer(serializers.ModelSerializer):
 
 class TenantLoginSerializer(serializers.Serializer):
     """
-    Login for any user who belongs to a specific tenant:
-    - Store owner
-    - TenantMember (manager / staff / viewer)
+    Authenticate users for tenant-specific access:
+    - Store owners
+    - Team members (manager, staff, viewer)
 
-    Returns JWT tokens + tenant info + the role within that store.
-    The client should store tenant_slug and send it as the
-    X-Tenant-Slug header on all subsequent store requests.
+    Returns JWT tokens along with tenant information and the user's role.
+    The client must store tenant_slug and include it in the
+    X-Tenant-Slug header for all subsequent store API calls.
     """
     username = serializers.CharField()
     password = serializers.CharField(write_only=True)
     tenant_slug = serializers.SlugField(
-        help_text='Slug of the store to log in to (e.g. techmart).'
+        help_text='Store slug for login (e.g., electrohub).'
     )
 
     def validate(self, attrs):
         user = authenticate(username=attrs['username'], password=attrs['password'])
         if not user:
-            raise serializers.ValidationError({'username': 'Invalid username or password.'})
+            raise serializers.ValidationError({'username': 'Invalid credentials provided.'})
         if not user.is_email_verified:
-            raise serializers.ValidationError({'username': 'Email is not verified.'})
+            raise serializers.ValidationError({'username': 'Please verify your email before logging in.'})
 
         try:
             tenant = Tenant.objects.get(slug=attrs['tenant_slug'], is_active=True)
         except Tenant.DoesNotExist:
-            raise serializers.ValidationError({'tenant_slug': 'Store not found or inactive.'})
+            raise serializers.ValidationError({'tenant_slug': 'Store not found or currently inactive.'})
 
-        # Determine this user's role within the tenant
+        # Determine the user's role within this tenant
         tenant_role = None
         try:
             if user.owned_tenant == tenant:
@@ -127,8 +128,8 @@ class TenantLoginSerializer(serializers.Serializer):
             except TenantMember.DoesNotExist:
                 raise serializers.ValidationError({
                     'tenant_slug': (
-                        'You are not a member of this store. '
-                        'Ask the store owner to add you via /api/tenant-members/.'
+                        'You do not have access to this store. '
+                        'Please contact the store owner to add you via /api/tenant-members/.'
                     )
                 })
 
@@ -148,5 +149,5 @@ class TenantLoginSerializer(serializers.Serializer):
                 'slug': tenant.slug,
             },
             'tenant_role': tenant_role,
-            'next_step': f'Set header  X-Tenant-Slug: {tenant.slug}  on all store requests.',
+            'next_step': f'Include X-Tenant-Slug: {tenant.slug} in all subsequent API requests.',
         }

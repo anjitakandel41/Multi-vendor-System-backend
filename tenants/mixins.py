@@ -3,41 +3,44 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 
 class TenantViewMixin:
     """
-    Add this mixin to any ViewSet or APIView to make it tenant-aware.
+    Mixin to make ViewSets and APIViews tenant-aware.
 
-    What it does automatically:
-    - get_queryset()    → scopes results to request.tenant
-    - perform_create()  → stamps new objects with request.tenant
-    - get_tenant()      → raises 403 if no tenant can be identified
+    Features:
+    - Automatically filters get_queryset() to the current tenant
+    - Automatically assigns tenant on perform_create()
+    - Provides get_tenant() with fallback resolution logic
+    - Raises 403 if no valid tenant can be identified
     """
 
-    # def get_tenant(self):
-    #     tenant = getattr(self.request, 'tenant', None)
-    #     # `not tenant` forces the SimpleLazyObject to evaluate its wrapped
-    #     # value — `is None` alone won't work because request.tenant is always
-    #     # a SimpleLazyObject, never None itself.
-    #     if not tenant:
-    #         raise PermissionDenied(
-    #             'Tenant could not be identified. '
-    #             'Send the X-Tenant-Slug header or log in as a vendor.'
-    #         )
-    #     return tenant
     def get_tenant(self):
+        """
+        Resolve and return the current tenant for this request.
+        
+        Resolution order:
+        1. Check if tenant is already attached to request
+        2. Try X-Tenant-Slug header
+        3. Try tenant query parameter
+        4. Raise PermissionDenied if none found
+        
+        Note: Uses explicit tenant checking to properly evaluate the 
+        SimpleLazyObject wrapper.
+        """
         tenant = getattr(self.request, 'tenant', None)
 
         if tenant:
             return tenant
 
-        slug = (
+        # Attempt to resolve from headers or query params
+        tenant_slug = (
             self.request.headers.get("X-Tenant-Slug")
             or self.request.query_params.get("tenant")
         )
 
-        if slug:
+        if tenant_slug:
             from tenants.models import Tenant
 
             tenant = Tenant.objects.filter(
-                slug=slug,
+                slug=tenant_slug,
                 is_active=True,
                 status=Tenant.STATUS_APPROVED
             ).first()
@@ -46,20 +49,28 @@ class TenantViewMixin:
                 return tenant
 
         raise PermissionDenied(
-            'Tenant could not be identified. '
-            'Send the X-Tenant-Slug header or log in as a vendor.'
+            'Unable to identify tenant. '
+            'Please provide X-Tenant-Slug header or log in as a vendor.'
         )
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        """
+        Filter queryset to only include objects belonging to the current tenant.
+        Uses explicit tenant check to properly evaluate the SimpleLazyObject.
+        """
+        queryset = super().get_queryset()
         tenant = getattr(self.request, 'tenant', None)
-        # Use `if tenant:` — forces SimpleLazyObject evaluation.
-        # `if tenant is not None:` would always be True because request.tenant
-        # is always a SimpleLazyObject wrapper, even when it wraps None.
+        
+        # Explicit truthiness check forces SimpleLazyObject evaluation
+        # Using `is not None` would always be True since request.tenant
+        # is always a SimpleLazyObject instance
         if tenant:
-            return qs.filter(tenant=tenant)
-        return qs
+            return queryset.filter(tenant=tenant)
+        return queryset
 
     def perform_create(self, serializer):
+        """
+        Automatically assign the current tenant when creating new objects.
+        """
         tenant = self.get_tenant()
         serializer.save(tenant=tenant)
