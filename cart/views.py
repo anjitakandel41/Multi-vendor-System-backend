@@ -16,7 +16,7 @@ from coupons.serializers import ApplyCouponSerializer
 
 from products.models import Product
 from inventory.models import Inventory
-from .serializers import SavedItemSerializer ,CartCheckoutSerializer
+from .serializers import SavedItemSerializer, CartCheckoutSerializer
 
 from .models import (
     Cart,
@@ -36,17 +36,22 @@ from .serializers import (
 
 
 # ---------------------------------------------------------
-# Helper
+# Utility Functions
 # ---------------------------------------------------------
 
 def get_user_cart(user):
     """
-    Returns the authenticated user's cart.
-    Creates one if it doesn't exist.
+    Retrieve or create a cart for the authenticated user.
+    Returns the cart instance.
     """
     cart, created = Cart.objects.get_or_create(user=user)
     return cart
+
+
 def get_product_available_stock(product):
+    """
+    Calculate available stock for a product across all inventories.
+    """
     inventories = product.inventories.all()
 
     if product.tenant_id:
@@ -61,19 +66,23 @@ def get_product_available_stock(product):
 
 
 def validate_product_can_be_added(product):
+    """
+    Validate if a product can be added to cart based on vendor status.
+    """
     if not product.tenant_id:
-        return "This product is not connected to any vendor."
+        return "This product is not associated with any vendor."
 
     if not product.tenant.is_active:
-        return "This vendor is inactive."
+        return "The vendor for this product is currently inactive."
 
     if getattr(product.tenant, "status", None) != "approved":
-        return "This vendor is not approved yet."
+        return "The vendor is not yet approved."
 
     return None
 
+
 # ---------------------------------------------------------
-# GET CART
+# View: View Cart
 # GET /api/cart/
 # ---------------------------------------------------------
 @extend_schema(tags=["Cart"])
@@ -91,7 +100,7 @@ class CartView(APIView):
 
 
 # ---------------------------------------------------------
-# ADD TO CART
+# View: Add Item to Cart
 # POST /api/cart/add/
 # ---------------------------------------------------------
 @extend_schema(request=AddToCartSerializer, tags=["Cart"])
@@ -102,42 +111,30 @@ class AddToCartView(APIView):
     @transaction.atomic
     def post(self, request):
 
-        serializer = AddToCartSerializer(
-            data=request.data
-        )
-
+        serializer = AddToCartSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         cart = get_user_cart(request.user)
-
         product = serializer.validated_data["product"]
-
         quantity = serializer.validated_data["quantity"]
 
-        item, created = CartItem.objects.get_or_create(
+        cart_item, created = CartItem.objects.get_or_create(
             cart=cart,
             product=product,
-            defaults={
-                "quantity": quantity
-            }
+            defaults={"quantity": quantity}
         )
 
         if not created:
-
-            new_quantity = item.quantity + quantity
+            new_quantity = cart_item.quantity + quantity
 
             if new_quantity > product.stock:
-
                 return Response(
-                    {
-                        "detail":
-                        "Not enough stock available."
-                    },
+                    {"detail": "Insufficient stock available."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            item.quantity = new_quantity
-            item.save()
+            cart_item.quantity = new_quantity
+            cart_item.save()
 
         return Response(
             CartSerializer(cart).data,
@@ -146,7 +143,7 @@ class AddToCartView(APIView):
 
 
 # ---------------------------------------------------------
-# UPDATE CART ITEM
+# View: Update Cart Item Quantity
 # PATCH /api/cart/item/{id}/
 # ---------------------------------------------------------
 @extend_schema(request=UpdateCartItemSerializer, tags=["Cart"])
@@ -159,36 +156,25 @@ class UpdateCartItemView(APIView):
 
         cart = get_user_cart(request.user)
 
-        cart_item = get_object_or_404(
-            CartItem,
-            id=pk,
-            cart=cart
-        )
+        cart_item = get_object_or_404(CartItem, id=pk, cart=cart)
 
         serializer = UpdateCartItemSerializer(
             cart_item,
             data=request.data,
             partial=True,
-            context={
-                "cart_item": cart_item
-            }
+            context={"cart_item": cart_item}
         )
 
         serializer.is_valid(raise_exception=True)
 
-        cart_item.quantity = serializer.validated_data[
-            "quantity"
-        ]
-
+        cart_item.quantity = serializer.validated_data["quantity"]
         cart_item.save()
 
-        return Response(
-            CartSerializer(cart).data
-        )
+        return Response(CartSerializer(cart).data)
 
 
 # ---------------------------------------------------------
-# DELETE CART ITEM
+# View: Remove Item from Cart
 # DELETE /api/cart/item/{id}/
 # ---------------------------------------------------------
 @extend_schema(tags=["Cart"])
@@ -201,24 +187,18 @@ class DeleteCartItemView(APIView):
 
         cart = get_user_cart(request.user)
 
-        item = get_object_or_404(
-            CartItem,
-            id=pk,
-            cart=cart
-        )
+        cart_item = get_object_or_404(CartItem, id=pk, cart=cart)
 
-        item.delete()
+        cart_item.delete()
 
         return Response(
-            {
-                "message":
-                "Item removed from cart successfully."
-            },
+            {"message": "Item removed from cart successfully."},
             status=status.HTTP_204_NO_CONTENT
         )
 
+
 # ---------------------------------------------------------
-# CLEAR CART
+# View: Clear Entire Cart
 # DELETE /api/cart/clear/
 # ---------------------------------------------------------
 @extend_schema(tags=["Cart"])
@@ -232,28 +212,24 @@ class ClearCartView(APIView):
         cart = get_user_cart(request.user)
 
         cart.items.all().delete()
-
         cart.applied_coupon = None
         cart.save(update_fields=["applied_coupon"])
 
         return Response(
-            {
-                "message": "Cart cleared successfully."
-            },
+            {"message": "Cart cleared successfully."},
             status=status.HTTP_200_OK
         )
 
 
 # ---------------------------------------------------------
-# APPLY COUPON
+# View: Apply Coupon to Cart
 # POST /api/cart/apply-coupon/
 # ---------------------------------------------------------
-
 @extend_schema(
     request=ApplyCouponSerializer,
     tags=["Cart"],
     summary="Apply Coupon",
-    description="Apply a coupon to the authenticated user's cart."
+    description="Apply a discount coupon to the current user's cart."
 )
 class ApplyCouponView(APIView):
 
@@ -266,9 +242,7 @@ class ApplyCouponView(APIView):
 
         serializer = ApplyCouponSerializer(
             data=request.data,
-            context={
-                "request": request
-            }
+            context={"request": request}
         )
 
         serializer.is_valid(raise_exception=True)
@@ -291,10 +265,9 @@ class ApplyCouponView(APIView):
 
 
 # ---------------------------------------------------------
-# REMOVE COUPON
+# View: Remove Coupon from Cart
 # DELETE /api/cart/remove-coupon/
 # ---------------------------------------------------------
-
 @extend_schema(tags=["Cart"])
 class RemoveCouponView(APIView):
 
@@ -306,11 +279,8 @@ class RemoveCouponView(APIView):
         cart = get_user_cart(request.user)
 
         if cart.applied_coupon is None:
-
             return Response(
-                {
-                    "message": "No coupon has been applied."
-                },
+                {"message": "No coupon is currently applied."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -318,15 +288,13 @@ class RemoveCouponView(APIView):
         cart.save(update_fields=["applied_coupon"])
 
         return Response(
-            {
-                "message": "Coupon removed successfully."
-            },
+            {"message": "Coupon removed successfully."},
             status=status.HTTP_200_OK
         )
 
 
 # ---------------------------------------------------------
-# CART SUMMARY
+# View: Cart Summary with Calculations
 # GET /api/cart/summary/
 # ---------------------------------------------------------
 @extend_schema(tags=["Cart"])
@@ -343,19 +311,10 @@ class CartSummaryView(APIView):
 
         subtotal = cart.subtotal
         discount = cart.discount_amount
-
-        taxable_amount = subtotal - discount
-
-        if taxable_amount < Decimal("0.00"):
-            taxable_amount = Decimal("0.00")
+        taxable_amount = max(subtotal - discount, Decimal("0.00"))
 
         tax = taxable_amount * self.TAX_RATE
-
-        grand_total = (
-            taxable_amount +
-            tax +
-            self.SHIPPING_COST
-        )
+        grand_total = taxable_amount + tax + self.SHIPPING_COST
 
         return Response(
             {
@@ -364,22 +323,16 @@ class CartSummaryView(APIView):
                 "discount": discount,
                 "shipping": self.SHIPPING_COST,
                 "tax": tax.quantize(Decimal("0.01")),
-                "grand_total": grand_total.quantize(
-                    Decimal("0.01")
-                ),
-                "coupon": (
-                    cart.applied_coupon.code
-                    if cart.applied_coupon
-                    else None
-                )
+                "grand_total": grand_total.quantize(Decimal("0.01")),
+                "coupon": cart.applied_coupon.code if cart.applied_coupon else None
             }
         )
-    
+
+
 # ---------------------------------------------------------
-# SAVE FOR LATER
+# View: Save Item for Later
 # POST /api/cart/save-for-later/
 # ---------------------------------------------------------
-
 @extend_schema(request=SaveForLaterSerializer, tags=["Cart"])
 class SaveForLaterView(APIView):
 
@@ -389,29 +342,20 @@ class SaveForLaterView(APIView):
     def post(self, request):
 
         cart = get_user_cart(request.user)
-
         item_id = request.data.get("item_id")
 
         if not item_id:
             return Response(
-                {
-                    "detail": "item_id is required."
-                },
+                {"detail": "item_id is required."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        cart_item = get_object_or_404(
-            CartItem,
-            id=item_id,
-            cart=cart
-        )
+        cart_item = get_object_or_404(CartItem, id=item_id, cart=cart)
 
         saved_item, created = SavedItem.objects.get_or_create(
             cart=cart,
             product=cart_item.product,
-            defaults={
-                "quantity": cart_item.quantity
-            }
+            defaults={"quantity": cart_item.quantity}
         )
 
         if not created:
@@ -421,15 +365,13 @@ class SaveForLaterView(APIView):
         cart_item.delete()
 
         return Response(
-            {
-                "message": "Item moved to Save For Later."
-            },
+            {"message": "Item moved to 'Save For Later' list."},
             status=status.HTTP_200_OK
         )
 
 
 # ---------------------------------------------------------
-# SAVED ITEMS
+# View: List Saved Items
 # GET /api/cart/saved-items/
 # ---------------------------------------------------------
 @extend_schema(tags=["Cart"])
@@ -441,23 +383,16 @@ class SavedItemsView(APIView):
 
         cart = get_user_cart(request.user)
 
-        serializer = SavedItemSerializer(
-            cart.saved_items.all(),
-            many=True
-        )
+        serializer = SavedItemSerializer(cart.saved_items.all(), many=True)
 
         return Response(serializer.data)
-    
+
 
 # ---------------------------------------------------------
-# MOVE TO CART
+# View: Move Saved Item Back to Cart
 # POST /api/cart/move-to-cart/
 # ---------------------------------------------------------
-
-@extend_schema(
-    request=MoveToCartSerializer,
-    tags=["Cart"]
-)
+@extend_schema(request=MoveToCartSerializer, tags=["Cart"])
 class MoveToCartView(APIView):
 
     permission_classes = [IsAuthenticated]
@@ -472,44 +407,29 @@ class MoveToCartView(APIView):
 
         saved_item_id = serializer.validated_data["saved_item_id"]
 
-        saved_item = get_object_or_404(
-            SavedItem,
-            id=saved_item_id,
-            cart=cart
-        )
+        saved_item = get_object_or_404(SavedItem, id=saved_item_id, cart=cart)
 
-        # Get product
         product = saved_item.product
 
-        # Check available quantity
+        # Verify stock availability
         if product.quantity < saved_item.quantity:
             return Response(
-                {
-                    "detail": "Not enough stock available."
-                },
+                {"detail": "Insufficient stock available."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         cart_item, created = CartItem.objects.get_or_create(
             cart=cart,
             product=product,
-            defaults={
-                "quantity": saved_item.quantity
-            }
+            defaults={"quantity": saved_item.quantity}
         )
 
         if not created:
-
-            new_quantity = (
-                cart_item.quantity +
-                saved_item.quantity
-            )
+            new_quantity = cart_item.quantity + saved_item.quantity
 
             if new_quantity > product.quantity:
                 return Response(
-                    {
-                        "detail": "Not enough stock available."
-                    },
+                    {"detail": "Insufficient stock available."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
@@ -519,17 +439,15 @@ class MoveToCartView(APIView):
         saved_item.delete()
 
         return Response(
-            {
-                "message": "Item moved back to cart."
-            },
+            {"message": "Item moved back to cart successfully."},
             status=status.HTTP_200_OK
         )
 
+
 # ---------------------------------------------------------
-# DELETE SAVED ITEM
+# View: Delete Saved Item
 # DELETE /api/cart/saved-items/{id}/
 # ---------------------------------------------------------
-
 @extend_schema(tags=["Cart"])
 class DeleteSavedItemView(APIView):
 
@@ -539,33 +457,35 @@ class DeleteSavedItemView(APIView):
 
         cart = get_user_cart(request.user)
 
-        saved_item = get_object_or_404(
-            SavedItem,
-            id=pk,
-            cart=cart
-        )
+        saved_item = get_object_or_404(SavedItem, id=pk, cart=cart)
 
         saved_item.delete()
 
         return Response(
-            {
-                "message":
-                "Saved item deleted successfully."
-            },
+            {"message": "Saved item removed successfully."},
             status=status.HTTP_204_NO_CONTENT
         )
+
+
+# ---------------------------------------------------------
+# View: Checkout - Process Cart to Orders
+# POST /api/cart/checkout/
+# ---------------------------------------------------------
 @extend_schema(request=CartCheckoutSerializer, tags=["Cart"])
 class CartCheckoutView(APIView):
+
     permission_classes = [IsAuthenticated]
 
     @transaction.atomic
     def post(self, request):
+
         serializer = CartCheckoutSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         customer_name = serializer.validated_data["customer_name"]
         payment_method = serializer.validated_data["payment_method"]
 
+        # Determine delivery city
         delivery_city = serializer.validated_data.get("delivery_city", "").strip()
 
         if not delivery_city:
@@ -576,44 +496,48 @@ class CartCheckoutView(APIView):
 
         if not delivery_city:
             return Response(
-                {"error": "delivery_city is required or set city in user profile."},
+                {"error": "delivery_city is required or must be set in user profile."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # Retrieve user's cart
         cart = Cart.objects.prefetch_related(
             "items__product__tenant"
         ).filter(user=request.user).first()
 
         if not cart or not cart.items.exists():
             return Response(
-                {"error": "Cart is empty."},
+                {"error": "Your cart is empty."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # Group items by vendor
         vendor_groups = {}
 
         for cart_item in cart.items.all():
             product = cart_item.product
             quantity = cart_item.quantity
 
+            # Validate vendor
             if not product.tenant_id:
                 return Response(
-                    {"error": f"{product.name} has no vendor."},
+                    {"error": f"{product.name} is not associated with any vendor."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
             if not product.tenant.is_active:
                 return Response(
-                    {"error": f"{product.tenant.name} vendor is inactive."},
+                    {"error": f"Vendor '{product.tenant.name}' is currently inactive."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
             if getattr(product.tenant, "status", None) != "approved":
                 return Response(
-                    {"error": f"{product.tenant.name} vendor is not approved."},
+                    {"error": f"Vendor '{product.tenant.name}' is not yet approved."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
+            # Check inventory availability in the delivery city
             inventory = Inventory.objects.select_for_update().filter(
                 tenant=product.tenant,
                 product=product,
@@ -626,8 +550,8 @@ class CartCheckoutView(APIView):
                 return Response(
                     {
                         "error": (
-                            f"{product.name} is not available in "
-                            f"{delivery_city} with quantity {quantity}."
+                            f"{product.name} is not available in {delivery_city} "
+                            f"with the requested quantity of {quantity}."
                         )
                     },
                     status=status.HTTP_400_BAD_REQUEST
@@ -635,7 +559,7 @@ class CartCheckoutView(APIView):
 
             if product.quantity < quantity:
                 return Response(
-                    {"error": f"Insufficient product stock for {product.name}."},
+                    {"error": f"Insufficient stock for {product.name}."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
@@ -659,6 +583,7 @@ class CartCheckoutView(APIView):
 
             vendor_groups[tenant_id]["original_amount"] += unit_price * quantity
 
+        # Create orders for each vendor group
         created_orders = []
 
         for group in vendor_groups.values():
@@ -679,6 +604,7 @@ class CartCheckoutView(APIView):
                 total_price=total_price,
             )
 
+            # Create order items and update inventory
             for item in group["items"]:
                 OrderItem.objects.create(
                     order=order,
@@ -688,21 +614,24 @@ class CartCheckoutView(APIView):
                     unit_price=item["unit_price"],
                 )
 
+                # Reduce inventory
                 inventory = item["inventory"]
                 inventory.quantity -= item["quantity"]
                 inventory.save(update_fields=["quantity"])
 
+                # Reduce product stock
                 product = item["product"]
                 product.quantity -= item["quantity"]
                 product.save(update_fields=["quantity"])
 
             created_orders.append(order)
 
+        # Clear the cart after successful checkout
         cart.items.all().delete()
 
         return Response(
             {
-                "message": "Cart checkout successful. Vendor orders created.",
+                "message": "Checkout completed successfully. Orders have been created.",
                 "order_count": len(created_orders),
                 "orders": [
                     {
