@@ -22,63 +22,53 @@ class EmailAuthTestCase(APITestCase):
             is_email_verified=False
         )
 
-    def test_registration_sends_verification_email(self):
+    def test_registration_creates_user(self):
         register_url = reverse("register")
         data = {
             "username": "newuser",
             "email": "newuser@example.com",
             "password": "Password123!"
         }
-        
-        # Clear outbox
-        mail.outbox = []
-        
+
         response = self.client.post(register_url, data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        
-        # Verify user is created and unverified
+
         new_user = User.objects.get(username="newuser")
-        self.assertFalse(new_user.is_email_verified)
-        
-        # Verify verification email is sent
-        self.assertEqual(len(mail.outbox), 1)
-        sent_email = mail.outbox[0]
-        self.assertEqual(sent_email.to, ["newuser@example.com"])
-        self.assertIn("Verify your Inventory Management API account", sent_email.subject)
-        self.assertIn("/api/auth/verify-email/", sent_email.body)
+        self.assertTrue(new_user.is_email_verified)
+        self.assertEqual(new_user.email, "newuser@example.com")
 
     def test_email_verification_success(self):
-        token = generate_token(self.user.id, "verify_email")
+        token = generate_token(self.user.id, "email_verification")
         verify_url = reverse("verify-email", kwargs={"token": token})
         
         response = self.client.get(verify_url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn("verified successfully", response.data["message"])
         
-        # Reload user and check verification status
         self.user.refresh_from_db()
         self.assertTrue(self.user.is_email_verified)
 
     def test_email_verification_invalid_token(self):
         verify_url = reverse("verify-email", kwargs={"token": "invalid_token_signature"})
-        
+
         response = self.client.get(verify_url)
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("error", response.data)
-        
+        self.assertIn("message", response.data)
+
         self.user.refresh_from_db()
         self.assertFalse(self.user.is_email_verified)
 
-    def test_login_unverified_email_fails(self):
+    def test_login_unverified_email_succeeds(self):
         login_url = reverse("login")
         data = {
             "username": self.username,
             "password": self.password
         }
-        
+
         response = self.client.post(login_url, data)
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("Email is not verified", response.data["non_field_errors"][0])
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("access", response.data)
+        self.assertIn("refresh", response.data)
 
     def test_login_verified_email_succeeds(self):
         self.user.is_email_verified = True
@@ -146,10 +136,10 @@ class EmailAuthTestCase(APITestCase):
             "password": "NewSecurePassword123",
             "confirm_password": "NewSecurePassword123"
         }
-        
+
         response = self.client.post(reset_url, data)
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("error", response.data)
+        self.assertIn("message", response.data)
 
     def test_reset_password_mismatched_passwords(self):
         token = generate_token(self.user.id, "reset_password")

@@ -1,26 +1,32 @@
 def add_tenant_auth_to_schema(result, generator, request, public):
     """
-    Postprocessing hook — injects X-Tenant-Slug as a named security scheme
-    so it appears in Swagger UI's Authorize dialog alongside the JWT field.
+    DRF Spectacular post-processing hook that adds X-Tenant-Slug 
+    as a security scheme in the Swagger UI.
 
-    After the user logs in, the response includes  tenant.slug  — they paste
-    that value here once and every request automatically sends the header.
+    This enables the tenant header to appear in the Authorize dialog 
+    alongside the JWT authentication field in the API documentation.
+
+    Usage: After login, users copy the tenant.slug from the response
+    and paste it here once - all subsequent requests will include it automatically.
     """
     components = result.setdefault('components', {})
-    schemes    = components.setdefault('securitySchemes', {})
+    schemes = components.setdefault('securitySchemes', {})
 
+    # Register the tenant authentication scheme
     schemes['tenantAuth'] = {
-        'type':        'apiKey',
-        'in':          'header',
-        'name':        'X-Tenant-Slug',
+        'type': 'apiKey',
+        'in': 'header',
+        'name': 'X-Tenant-Slug',
         'description': (
-            'Your store slug (e.g. **techmart**). '
-            'You get this from the login response under `tenant.slug`. '
-            'Required for all store endpoints (products, warehouses, inventory, orders, etc.).'
+            'Your store identifier slug (e.g., **electrohub**). '
+            'This value is provided in the login response under `tenant.slug`. '
+            'Required for all tenant-scoped endpoints (products, warehouses, '
+            'inventory management, orders, etc.).'
         ),
     }
 
-    # Add to global security so every endpoint shows both locks in Swagger UI
+    # Apply tenant authentication globally so all endpoints display 
+    # both security locks in the Swagger UI interface
     security = result.setdefault('security', [])
     if {'tenantAuth': []} not in security:
         security.append({'tenantAuth': []})

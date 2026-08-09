@@ -8,10 +8,10 @@ class Tenant(models.Model):
     Every piece of business data (products, orders, warehouses …)
     is linked back to a Tenant so that vendors never see each other's data.
     """
-    name        = models.CharField(max_length=255, unique=True)
-    slug        = models.SlugField(max_length=100, unique=True)
+    name = models.CharField(max_length=255, unique=True)
+    slug = models.SlugField(max_length=100, unique=True)
     description = models.TextField(blank=True)
-    owner       = models.OneToOneField(
+    owner = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='owned_tenant',
@@ -34,8 +34,8 @@ class Tenant(models.Model):
     )
 
     is_active = models.BooleanField(default=True)
-    created_at  = models.DateTimeField(auto_now_add=True)
-    updated_at  = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['name']
@@ -97,21 +97,21 @@ class TenantMember(models.Model):
       viewer  — read-only access
     """
     ROLE_MANAGER = 'manager'
-    ROLE_STAFF   = 'staff'
-    ROLE_VIEWER  = 'viewer'
+    ROLE_STAFF = 'staff'
+    ROLE_VIEWER = 'viewer'
     ROLE_CHOICES = [
         (ROLE_MANAGER, 'Manager'),
-        (ROLE_STAFF,   'Staff'),
-        (ROLE_VIEWER,  'Viewer'),
+        (ROLE_STAFF, 'Staff'),
+        (ROLE_VIEWER, 'Viewer'),
     ]
 
-    tenant    = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='members')
-    user      = models.ForeignKey(
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='members')
+    user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='tenant_memberships',
     )
-    role      = models.CharField(max_length=20, choices=ROLE_CHOICES, default=ROLE_STAFF)
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default=ROLE_STAFF)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

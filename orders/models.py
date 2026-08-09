@@ -1,162 +1,299 @@
+# orders/models.py
+
 from django.db import models
 from django.conf import settings
+from django.utils import timezone
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.exceptions import ValidationError
+from decimal import Decimal
 
 from products.models import Product
-from warehouses.models import Warehouse
-from tenants.models import TenantManager
-
-from django.utils import timezone
+from warehouses.models import Warehouse  # Changed from inventory.models
+from tenants.models import Tenant
 
 
 class Order(models.Model):
-
-    STATUS_PENDING    = 'pending'
+    """
+    Order model representing customer purchases.
+    """
+    # Status choices
+    STATUS_PENDING = 'pending'
     STATUS_PROCESSING = 'processing'
-    STATUS_SHIPPED    = 'shipped'
-    STATUS_COMPLETED  = 'completed'
-    STATUS_CANCELLED  = 'cancelled'
-
+    STATUS_SHIPPED = 'shipped'
+    STATUS_COMPLETED = 'completed'
+    STATUS_CANCELLED = 'cancelled'
+    
     STATUS_CHOICES = [
-        (STATUS_PENDING,    'Pending'),
+        (STATUS_PENDING, 'Pending'),
         (STATUS_PROCESSING, 'Processing'),
-        (STATUS_SHIPPED,    'Shipped'),
-        (STATUS_COMPLETED,  'Completed'),
-        (STATUS_CANCELLED,  'Cancelled'),
+        (STATUS_SHIPPED, 'Shipped'),
+        (STATUS_COMPLETED, 'Completed'),
+        (STATUS_CANCELLED, 'Cancelled'),
     ]
-
-    PAYMENT_METHOD_ESEWA  = 'esewa'
-    PAYMENT_METHOD_COD    = 'cod'
-    PAYMENT_METHOD_KHALTI = 'khalti'  #  NEW: added Khalti
-
+    
+    # Payment method choices
+    PAYMENT_METHOD_ESEWA = 'esewa'
+    PAYMENT_METHOD_KHALTI = 'khalti'
+    PAYMENT_METHOD_COD = 'cod'
+    
     PAYMENT_METHOD_CHOICES = [
-        (PAYMENT_METHOD_ESEWA,  'eSewa'),
-        (PAYMENT_METHOD_COD,    'Cash on Delivery'),
-        (PAYMENT_METHOD_KHALTI, 'Khalti'),  #  NEW: added Khalti choice
+        (PAYMENT_METHOD_ESEWA, 'eSewa'),
+        (PAYMENT_METHOD_KHALTI, 'Khalti'),
+        (PAYMENT_METHOD_COD, 'Cash on Delivery'),
     ]
-
-    #  NEW: payment status constants (was raw strings before)
-    PAYMENT_STATUS_PENDING  = 'pending'
-    PAYMENT_STATUS_PAID     = 'paid'
-    PAYMENT_STATUS_FAILED   = 'failed'
+    
+    # Payment status choices
+    PAYMENT_STATUS_PENDING = 'pending'
+    PAYMENT_STATUS_PAID = 'paid'
+    PAYMENT_STATUS_FAILED = 'failed'
     PAYMENT_STATUS_REFUNDED = 'refunded'
-
-    # NEW: payment status choices using constants
+    
     PAYMENT_STATUS_CHOICES = [
-        (PAYMENT_STATUS_PENDING,  'Pending'),
-        (PAYMENT_STATUS_PAID,     'Paid'),
-        (PAYMENT_STATUS_FAILED,   'Failed'),
+        (PAYMENT_STATUS_PENDING, 'Pending'),
+        (PAYMENT_STATUS_PAID, 'Paid'),
+        (PAYMENT_STATUS_FAILED, 'Failed'),
         (PAYMENT_STATUS_REFUNDED, 'Refunded'),
     ]
-
+    
+    # Cancellation reason choices
+    CANCELLATION_REASON_ORDERED_BY_MISTAKE = "ordered_by_mistake"
+    CANCELLATION_REASON_WRONG_ADDRESS = "wrong_address"
+    CANCELLATION_REASON_WRONG_PRODUCT = "wrong_product"
+    CANCELLATION_REASON_NO_LONGER_NEEDED = "no_longer_needed"
+    CANCELLATION_REASON_FOUND_BETTER_PRICE = "found_better_price"
+    CANCELLATION_REASON_OTHER = "other"
+    
+    CANCELLATION_REASON_CHOICES = [
+        (
+            CANCELLATION_REASON_ORDERED_BY_MISTAKE,
+            "Ordered by mistake",
+        ),
+        (
+            CANCELLATION_REASON_WRONG_ADDRESS,
+            "Wrong delivery address",
+        ),
+        (
+            CANCELLATION_REASON_WRONG_PRODUCT,
+            "Selected the wrong product",
+        ),
+        (
+            CANCELLATION_REASON_NO_LONGER_NEEDED,
+            "Product is no longer needed",
+        ),
+        (
+            CANCELLATION_REASON_FOUND_BETTER_PRICE,
+            "Found a better price",
+        ),
+        (
+            CANCELLATION_REASON_OTHER,
+            "Other",
+        ),
+    ]
+    
+    # Fields
     tenant = models.ForeignKey(
-        'tenants.Tenant',
+        Tenant,
         on_delete=models.CASCADE,
-        related_name='orders',
-        null=True,
-        blank=True,
+        related_name='orders'
     )
-
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='orders'
     )
-
     customer_name = models.CharField(max_length=255)
-
-    delivery_city = models.CharField(
-        max_length=100,
-        default='Kathmandu'
+    delivery_city = models.CharField(max_length=100)
+    delivery_address = models.JSONField(null=True, blank=True)
+    
+    # Order details
+    original_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0.00
     )
-
-    status = models.CharField(
-        max_length=20,
-        choices=STATUS_CHOICES,
-        default=STATUS_PENDING
+    discount_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0.00
     )
-
+    total_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0.00
+    )
+    delivery_charge = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0.00
+    )
+    
+    # Payment related
     payment_method = models.CharField(
-        max_length=10,
+        max_length=20,
         choices=PAYMENT_METHOD_CHOICES,
         default=PAYMENT_METHOD_COD
     )
-
-    #  UPDATED: now uses PAYMENT_STATUS_CHOICES and constant default
     payment_status = models.CharField(
         max_length=20,
         choices=PAYMENT_STATUS_CHOICES,
         default=PAYMENT_STATUS_PENDING
     )
-
-    # UPDATED: help text updated to mention Khalti
     payment_transaction_id = models.CharField(
         max_length=255,
-        blank=True,
         null=True,
-        unique=True,
-        help_text='eSewa or Khalti transaction ID after successful payment'
+        blank=True
     )
-
-    original_amount = models.DecimalField(
-        max_digits=12,
-        decimal_places=2,
-        default=0
+    
+    # Status and timestamps
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING
     )
-
-    discount_amount = models.DecimalField(
-        max_digits=12,
-        decimal_places=2,
-        default=0
+    notes = models.TextField(blank=True)
+    
+    # Cancellation fields
+    cancellation_reason = models.CharField(
+        max_length=50,
+        choices=CANCELLATION_REASON_CHOICES,
+        null=True,
+        blank=True,
     )
-
-    total_price = models.DecimalField(
-        max_digits=12,
-        decimal_places=2,
-        default=0
+    cancellation_details = models.TextField(
+        blank=True,
+        help_text=(
+            "Additional explanation required when "
+            "the cancellation reason is Other."
+        ),
     )
-
-    processed_at = models.DateTimeField(null=True, blank=True)
-    shipped_at   = models.DateTimeField(null=True, blank=True)
-    completed_at = models.DateTimeField(null=True, blank=True)
-    cancelled_at = models.DateTimeField(null=True, blank=True)
-    paid_at      = models.DateTimeField(null=True, blank=True)
-
+    cancelled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="cancelled_orders",
+    )
+    inventory_restored = models.BooleanField(
+        default=False,
+    )
+    
+    # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
-    objects = TenantManager()
-
+    paid_at = models.DateTimeField(null=True, blank=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+    shipped_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    
     class Meta:
         ordering = ['-created_at']
-
+        indexes = [
+            models.Index(fields=['tenant', 'status']),
+            models.Index(fields=['user', 'created_at']),
+            models.Index(fields=['payment_transaction_id']),
+        ]
+    
+    def __str__(self):
+        return f"Order #{self.id} - {self.customer_name}"
+    
     def clean(self):
+        super().clean()
+        
         errors = {}
-        if len(self.customer_name.strip()) < 3:
-            errors['customer_name'] = (
-                'Customer name must contain at least 3 characters.'
-            )
-        if len(self.delivery_city.strip()) < 2:
-            errors['delivery_city'] = 'Delivery city is invalid.'
+        
+        if self.status == self.STATUS_CANCELLED:
+            if not self.cancellation_reason:
+                errors["cancellation_reason"] = (
+                    "A cancellation reason is required."
+                )
+            
+            if (
+                self.cancellation_reason
+                == self.CANCELLATION_REASON_OTHER
+                and not self.cancellation_details.strip()
+            ):
+                errors["cancellation_details"] = (
+                    "Please provide cancellation details."
+                )
+        
         if errors:
             raise ValidationError(errors)
-
-    def save(self, *args, **kwargs):
-        self.full_clean()
-        super().save(*args, **kwargs)
-
-    # UPDATED: added payment_method to __str__
-    def __str__(self):
-        return (
-            f'Order #{self.id} - '
-            f'{self.customer_name} - '
-            f'{self.status} - '
-            f'{self.payment_method}'
+    
+    def cancel(self, cancelled_by, reason, details=""):
+        if not self.can_cancel:
+            raise ValidationError(
+                {
+                    "status": (
+                        "Only pending or processing orders "
+                        "can be cancelled."
+                    )
+                }
+            )
+        
+        valid_reasons = {
+            choice[0]
+            for choice in self.CANCELLATION_REASON_CHOICES
+        }
+        
+        if reason not in valid_reasons:
+            raise ValidationError(
+                {
+                    "cancellation_reason": (
+                        "Invalid cancellation reason."
+                    )
+                }
+            )
+        
+        details = details.strip()
+        
+        if (
+            reason == self.CANCELLATION_REASON_OTHER
+            and not details
+        ):
+            raise ValidationError(
+                {
+                    "cancellation_details": (
+                        "Cancellation details are required "
+                        "when the reason is Other."
+                    )
+                }
+            )
+        
+        self.status = self.STATUS_CANCELLED
+        self.cancellation_reason = reason
+        self.cancellation_details = details
+        self.cancelled_by = cancelled_by
+        self.cancelled_at = timezone.now()
+        
+        self.save(
+            update_fields=[
+                "status",
+                "cancellation_reason",
+                "cancellation_details",
+                "cancelled_by",
+                "cancelled_at",
+                "updated_at",
+            ]
         )
+    
+    @property
+    def is_paid(self):
+        return self.payment_status == self.PAYMENT_STATUS_PAID
+    
+    @property
+    def can_cancel(self):
+        return self.status in [self.STATUS_PENDING, self.STATUS_PROCESSING]
+    
+    @property
+    def total_items(self):
+        return self.items.count()
 
 
 class OrderItem(models.Model):
-
+    """
+    Individual items within an order.
+    """
     order = models.ForeignKey(
         Order,
         on_delete=models.CASCADE,
@@ -164,52 +301,251 @@ class OrderItem(models.Model):
     )
     product = models.ForeignKey(
         Product,
-        on_delete=models.CASCADE
+        on_delete=models.CASCADE,
+        related_name='order_items'
     )
     warehouse = models.ForeignKey(
         Warehouse,
-        on_delete=models.CASCADE
+        on_delete=models.CASCADE,
+        related_name='order_items',
+        null=True,
+        blank=True
     )
-
-    quantity   = models.PositiveIntegerField()
+    quantity = models.PositiveIntegerField(
+        validators=[MinValueValidator(1)]
+    )
     unit_price = models.DecimalField(
         max_digits=10,
         decimal_places=2
     )
-
+    created_at = models.DateTimeField(auto_now_add=True)
+    
     class Meta:
         ordering = ['id']
-
-    def clean(self):
-        if self.quantity <= 0:
-            raise ValidationError({
-                'quantity': 'Quantity must be greater than zero.'
-            })
-
-    def save(self, *args, **kwargs):
-        self.full_clean()
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return (
-            f'Order #{self.order.id} - '
-            f'{self.product.name} x '
-            f'{self.quantity}'
-        )
+        indexes = [
+            models.Index(fields=['order', 'product']),
+        ]
     
+    def __str__(self):
+        return f"{self.product.name} x {self.quantity}"
+    
+    @property
+    def total_price(self):
+        return self.unit_price * self.quantity
 
 
-class Invoice(models.Model):
+# REMOVED: Payment model - using payment app instead
+
+
+class Delivery(models.Model):
+    """
+    Delivery tracking for orders.
+    """
+    DELIVERY_STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('processing', 'Processing'),
+        ('shipped', 'Shipped'),
+        ('out_for_delivery', 'Out for Delivery'),
+        ('delivered', 'Delivered'),
+        ('failed', 'Failed'),
+        ('returned', 'Returned'),
+    ]
+    
     order = models.OneToOneField(
         Order,
-        related_name="invoice",
-        on_delete=models.CASCADE
+        on_delete=models.CASCADE,
+        related_name='delivery'
     )
-    invoice_number = models.CharField(
-        max_length=50,
-        unique=True
+    status = models.CharField(
+        max_length=20,
+        choices=DELIVERY_STATUS_CHOICES,
+        default='pending'
     )
-    generated_at = models.DateTimeField(auto_now_add=True)
-
+    tracking_number = models.CharField(max_length=255, null=True, blank=True)
+    tracking_url = models.URLField(null=True, blank=True)
+    delivery_partner = models.CharField(max_length=100, null=True, blank=True)
+    estimated_delivery = models.DateTimeField(null=True, blank=True)
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    delivery_notes = models.TextField(blank=True)
+    
+    # Delivery address details
+    address_line1 = models.CharField(max_length=255, blank=True)
+    address_line2 = models.CharField(max_length=255, blank=True)
+    city = models.CharField(max_length=100, blank=True)
+    state = models.CharField(max_length=100, blank=True)
+    postal_code = models.CharField(max_length=20, blank=True)
+    country = models.CharField(max_length=100, default='Nepal')
+    phone_number = models.CharField(max_length=20, blank=True)
+    
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['tracking_number']),
+            models.Index(fields=['status']),
+        ]
+    
     def __str__(self):
-        return self.invoice_number
+        return f"Delivery {self.id} - Order {self.order.id}"
+    
+    def mark_shipped(self, tracking_number=None, delivery_partner=None):
+        """Mark delivery as shipped."""
+        self.status = 'shipped'
+        if tracking_number:
+            self.tracking_number = tracking_number
+        if delivery_partner:
+            self.delivery_partner = delivery_partner
+        self.estimated_delivery = timezone.now() + timezone.timedelta(days=7)
+        self.save()
+        
+        # Update order status
+        self.order.status = Order.STATUS_SHIPPED
+        self.order.shipped_at = timezone.now()
+        self.order.save()
+    
+    def mark_delivered(self):
+        """Mark delivery as delivered."""
+        self.status = 'delivered'
+        self.delivered_at = timezone.now()
+        self.save()
+        
+        # Update order status
+        self.order.status = Order.STATUS_COMPLETED
+        self.order.completed_at = timezone.now()
+        self.order.save()
+
+
+class OrderPrescription(models.Model):
+    """
+    Prescription model for orders that require prescription.
+    """
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        APPROVED = 'approved', 'Approved'
+        REJECTED = 'rejected', 'Rejected'
+    
+    order = models.OneToOneField(
+        Order,
+        on_delete=models.CASCADE,
+        related_name='prescription'
+    )
+    image = models.ImageField(upload_to='prescriptions/%Y/%m/')
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='reviewed_prescriptions'
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True, help_text="Review notes or rejection reason")
+    
+    class Meta:
+        ordering = ['-uploaded_at']
+        indexes = [
+            models.Index(fields=['status']),
+            models.Index(fields=['order', 'status']),
+        ]
+    
+    def __str__(self):
+        return f"Prescription for Order #{self.order.id} - {self.status}"
+    
+    def approve(self, reviewer, notes=None):
+        """Approve the prescription."""
+        self.status = self.Status.APPROVED
+        self.reviewed_by = reviewer
+        self.reviewed_at = timezone.now()
+        if notes:
+            self.notes = notes
+        self.save()
+    
+    def reject(self, reviewer, notes=None):
+        """Reject the prescription."""
+        self.status = self.Status.REJECTED
+        self.reviewed_by = reviewer
+        self.reviewed_at = timezone.now()
+        if notes:
+            self.notes = notes
+        self.save()
+    
+    @property
+    def is_pending(self):
+        return self.status == self.Status.PENDING
+    
+    @property
+    def is_approved(self):
+        return self.status == self.Status.APPROVED
+    
+    @property
+    def is_rejected(self):
+        return self.status == self.Status.REJECTED
+
+
+# orders/models.py - Update the Invoice model
+
+class Invoice(models.Model):
+    """
+    Invoice model for order billing.
+    """
+    INVOICE_STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('issued', 'Issued'),
+        ('paid', 'Paid'),
+        ('cancelled', 'Cancelled'),
+    ]
+    
+    order = models.OneToOneField(
+        Order,
+        on_delete=models.CASCADE,
+        related_name='invoice'
+    )
+    invoice_number = models.CharField(max_length=50, unique=True, null=True, blank=True)  # Allow null
+    amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)  # Add default
+    tax_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    total_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)  # Add default
+    status = models.CharField(
+        max_length=20,
+        choices=INVOICE_STATUS_CHOICES,
+        default='draft'
+    )
+    pdf_file = models.FileField(upload_to='invoices/%Y/%m/', null=True, blank=True)
+    
+    # Billing details
+    billing_address = models.JSONField(null=True, blank=True)
+    
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    issued_at = models.DateTimeField(null=True, blank=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['invoice_number']),
+            models.Index(fields=['status']),
+        ]
+    
+    def __str__(self):
+        return f"Invoice {self.invoice_number} - {self.order.id}"
+    
+    def issue(self):
+        """Issue the invoice."""
+        self.status = 'issued'
+        self.issued_at = timezone.now()
+        self.save()
+    
+    def mark_paid(self):
+        """Mark invoice as paid."""
+        self.status = 'paid'
+        self.paid_at = timezone.now()
+        self.save()

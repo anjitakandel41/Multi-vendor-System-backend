@@ -4,11 +4,10 @@ Django settings for config project.
 
 from decimal import Decimal
 from pathlib import Path
-import os # imports os module for operating system interfaces (environments varabiles, file paths, etc)
-from datetime import timedelta # used for JWT token expiration times
-from django.core.exceptions import ImproperlyConfigured # imports expection that rises when django settings are misconfigured or missing required values 
-
-from dotenv import load_dotenv # used to load environment variables from .env file into os.environ
+import os
+from datetime import timedelta
+from django.core.exceptions import ImproperlyConfigured
+from dotenv import load_dotenv
 from corsheaders.defaults import default_headers
 import dj_database_url 
 import cloudinary
@@ -20,7 +19,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY
 SECRET_KEY = os.getenv("SECRET_KEY") or os.getenv("DJANGO_SECRET_KEY")
 
-# Check if SECRET_KEY is set (critical for production)
 if not SECRET_KEY:
     raise ImproperlyConfigured(
         "The DJANGO_SECRET_KEY environment variable must not be empty. "
@@ -28,17 +26,16 @@ if not SECRET_KEY:
     )
 
 DEBUG = os.getenv("DEBUG", "False") == "True"
-# True in development, but False in production, hides errors and better security 
 
 ALLOWED_HOSTS = [
-    "127.0.0.1", # local computer IP
-    
-    "localhost", # local computer name 
-    ".railway.app", # Any subdomain of railway.app
-    ".up.railway.app",  ### Add Railway default domain
+    "127.0.0.1",
+    "localhost",
+    ".railway.app",
+    ".up.railway.app",
     "192.168.18.227",
-    "192.168.18.222"
-    
+    "192.168.18.220",
+    "192.168.18.224",
+    "192.168.18.221",
 ]
 
 railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN")
@@ -50,18 +47,18 @@ CSRF_TRUSTED_ORIGINS = [
     "https://*.up.railway.app",
 ]
 
+
+
 # CORS Settings (Updated)
 # Allow all origins in development, restrict in production
 CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only allow all in debug mode
 
-# If not in debug mode, specify allowed origins
 if not DEBUG:
-    # Read allowed origins from environment variable or use defaults
     cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "")
     if cors_origins:
         CORS_ALLOWED_ORIGINS = cors_origins.split(",")
     else:
-        CORS_ALLOWED_ORIGINS = [ # development: Allow local frontends
+        CORS_ALLOWED_ORIGINS = [
             "http://localhost:3000",
             "http://localhost:5173",
             "http://localhost:8000",
@@ -105,7 +102,6 @@ CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_ALL_HEADERS = True
 
 # CLOUDINARY
-
 CLOUDINARY_STORAGE = {
     "CLOUD_NAME": os.getenv("CLOUDINARY_CLOUD_NAME"),
     "API_KEY": os.getenv("CLOUDINARY_API_KEY"),
@@ -118,33 +114,60 @@ cloudinary.config(
     api_secret=os.getenv("CLOUDINARY_API_SECRET"),
 )
 
-DEFAULT_FILE_STORAGE = (
-    "cloudinary_storage.storage.MediaCloudinaryStorage"
-)
+DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
 
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
 
-# Simple fix - use console backend on Railway
+# ============================================
+# EMAIL CONFIGURATION FOR PASSWORD RESET
+# ============================================
+
+# Email Configuration
 if os.getenv('RAILWAY_ENVIRONMENT_NAME'):
+    # Use console backend on Railway for testing
     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+    print("⚠️ Using console email backend for development")
 else:
+    # Production email configuration
     EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-    EMAIL_HOST = 'smtp.gmail.com'
-    EMAIL_PORT = 587
-    EMAIL_USE_TLS = True
+    EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
+    EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
+    EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
     EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
     EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
+    
+    # Validate email settings in production
+    if not EMAIL_HOST_USER or not EMAIL_HOST_PASSWORD:
+        print("⚠️ WARNING: Email credentials not set. Using console backend.")
+        EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
+# Email settings
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER or 'noreply@example.com')
+SUPPORT_EMAIL = os.getenv('SUPPORT_EMAIL', DEFAULT_FROM_EMAIL)
+
+# Site settings
+SITE_NAME = os.getenv('SITE_NAME', 'Inventory Management System')
+
 # Frontend/Backend URL for email links
 FRONTEND_URL = os.getenv(
     'FRONTEND_URL',
-    'https://inventorymanagement-api-production.up.railway.app'
+    # 'https://inventorymanagement-api-production.up.railway.app'
+    "http://127.0.0.1:8000",
 )
+
+# Password Reset Settings
+PASSWORD_RESET_TIMEOUT = int(os.getenv('PASSWORD_RESET_TIMEOUT', 24))  # Hours
+PASSWORD_RESET_TOKEN_EXPIRY_DAYS = int(os.getenv('PASSWORD_RESET_TOKEN_EXPIRY_DAYS', 1))
+
+# ============================================
+# END EMAIL CONFIGURATION
+# ============================================
 
 INSTALLED_APPS = [
     "jazzmin",
     "django.contrib.admin",
     "django.contrib.auth",
-    "django.contrib.contenttypes", # tracks django models 
+    "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
@@ -158,10 +181,9 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt",
     "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
-    "social_django", #social authentication such as Google OAuth
+    "social_django",
 
     "tenants",
-
     "products",
     "warehouses",
     "inventory",
@@ -174,9 +196,8 @@ INSTALLED_APPS = [
     "notifications",
     "cart",
     "payment",
+    "contact",
 ]
-
-# MIDDLEWARE list of middleware components (process requests/responses in order)
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
@@ -192,18 +213,16 @@ MIDDLEWARE = [
     "tenants.middleware.TenantMiddleware",
 ]
 
-# URLS
-
 ROOT_URLCONF = "config.urls"
-
 WSGI_APPLICATION = "config.wsgi.application"
-
-# TEMPLATES
 
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [BASE_DIR / "email_templates"],
+        "DIRS": [
+            BASE_DIR / "templates",  # Changed from email_templates to templates
+            BASE_DIR / "email_templates",  # Keep for backward compatibility
+        ],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -216,7 +235,6 @@ TEMPLATES = [
 ]
 
 # DATABASE
-
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if DATABASE_URL:
@@ -225,55 +243,50 @@ if DATABASE_URL:
             DATABASE_URL,
             conn_max_age=0,   # Neon serverless: don't reuse connections across requests
             ssl_require=True, # Neon requires SSL — already in URL but this is a safety net
+            disable_server_side_cursors=True,
+            
+
+            
         )
     }
 else:
     DATABASES = {
         "default": {
-            "ENGINE":
-            "django.db.backends.sqlite3",
+            "ENGINE": "django.db.backends.sqlite3",
             "NAME": BASE_DIR / "db.sqlite3",
+            "DISABLE_SERVER_SIDE_CURSORS": True,
         }
     }
 
-# AUTH USER   ### uses custom user model instead of default django user model  
+# AUTH USER
 AUTH_USER_MODEL = "accounts.CustomUser"
 
 AUTH_PASSWORD_VALIDATORS = [
     {
         "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
-        "OPTIONS":{"min_length": 8},
+        "OPTIONS": {"min_length": 8},
     },
     {
-        "NAME":"django.contrib.auth.password_validation.CommonPasswordValidator",
+        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
     },
     {
-        "NAME":"django.contrib.auth.password_validation.NumericPasswordValidator",
+        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
     },
 ]
 
 # LANGUAGE
 LANGUAGE_CODE = "en-us"
-
-TIME_ZONE = "UTC" # universal Time coordinated 
-
-USE_I18N = True # enable internationalization 
-
-USE_TZ = True  # use timezone-aware datatimes
+TIME_ZONE = "UTC"
+USE_I18N = True
+USE_TZ = True
 
 # STATIC FILES
-STATIC_URL = "/static/"  ## url path for static files (CSS, JS, images)
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
-STATIC_ROOT = BASE_DIR / "staticfiles" # folder where django collects all static files for production
-
-STATICFILES_STORAGE = (
-    "whitenoise.storage.CompressedManifestStaticFilesStorage"
-)
-
-# MEDIA handles user-uploaded files( profile pictures, product images )
-
+# MEDIA
 MEDIA_URL = "/media/"
-
 MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -283,54 +296,39 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
-
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
     ),
-
-    "DEFAULT_SCHEMA_CLASS":
-        "drf_spectacular.openapi.AutoSchema",
-
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_FILTER_BACKENDS": (
-        "django_filters.rest_framework.DjangoFilterBackend",# search by exact filelds
-        "rest_framework.filters.SearchFilter", # search text
-        "rest_framework.filters.OrderingFilter", # sort results 
+        "django_filters.rest_framework.DjangoFilterBackend",
+        "rest_framework.filters.SearchFilter",
+        "rest_framework.filters.OrderingFilter",
     ),
-
-    "DEFAULT_PAGINATION_CLASS":
-        "rest_framework.pagination.PageNumberPagination",
-
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 10,
 }
 
 # JWT
-
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(days=7),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
-    "ROTATE_REFRESH_TOKENS": False, # not to give refresh token each time
-    "BLACKLIST_AFTER_ROTATION": True, # old token becomes invalid 
-    "AUTH_HEADER_TYPES": ("Bearer",), # format: "Bearer <token>"
+    "ROTATE_REFRESH_TOKENS": False,
+    "BLACKLIST_AFTER_ROTATION": True,
+    "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
 # SWAGGER
-
 SPECTACULAR_SETTINGS = {
     "TITLE": "Inventory Management API",
     "DESCRIPTION": "Professional Inventory & Order Management API",
     "VERSION": "1.0.0",
-
     "SERVE_INCLUDE_SCHEMA": False,
-
     "SCHEMA_PATH_PREFIX": "/api/",
-
     "SWAGGER_UI_SETTINGS": {
         "deepLinking": True,
         "persistAuthorization": True,
     },
-
-    # Inject X-Tenant-Slug as a named security scheme so it appears
-    # in Swagger UI's Authorize dialog alongside the JWT Bearer field.
     "POSTPROCESSING_HOOKS": [
         "drf_spectacular.hooks.postprocess_schema_enums",
         "tenants.openapi.add_tenant_auth_to_schema",
@@ -338,49 +336,40 @@ SPECTACULAR_SETTINGS = {
 }
 
 # Google OAuth Settings
-# GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
-# GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
-
 SOCIAL_AUTH_GOOGLE_OAUTH2_KEY = os.getenv('GOOGLE_CLIENT_ID')
 SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET = os.getenv('GOOGLE_CLIENT_SECRET')
-# Add authentication backends
+
 AUTHENTICATION_BACKENDS = (
-    'social_core.backends.google.GoogleOAuth2', # google login 
-    'django.contrib.auth.backends.ModelBackend', # Normal username/password
+    'social_core.backends.google.GoogleOAuth2',
+    'django.contrib.auth.backends.ModelBackend',
 )
 
-# CACHE for a faster response 
+# CACHE
 CACHES = {
     "default": {
-        "BACKEND":
-        "django.core.cache.backends.locmem.LocMemCache",
-        "LOCATION":
-        "unique-inventory-cache",
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "unique-inventory-cache",
     }
 }
 
-""""
-cache stores frequently accessed data in RAM for quick retrieval.
-"""
-
-
+# ESEWA
 ESEWA_SETTINGS = {
-    "MERCHANT_ID": "",  # Sandbox test merchant
-    "SECRET_KEY": "",  # Sandbox secret key
+    "MERCHANT_ID": "",
+    "SECRET_KEY": "",
     "INITIATE_URL": "https://rc-epay.esewa.com.np/api/epay/main/v2/form",
     "SUCCESS_URL": "https://yourdomain.com/api/orders/esewa-verify/",
     "FAILURE_URL": "https://yourdomain.com/payment-failed",
 }
 
-
+# KHALTI
 KHALTI_SECRET_KEY = os.getenv("KHALTI_SECRET_KEY")
 KHALTI_PUBLIC_KEY = os.getenv("KHALTI_PUBLIC_KEY")
 
 WEBSITE_URL = "http://127.0.0.1:8000"
-
 PAYMENT_RETURN_URL = "http://127.0.0.1:8000/api/payments/verify/"
 VAT_PERCENTAGE = Decimal("13.00")
 
+# JAZZMIN
 JAZZMIN_SETTINGS = {
     "site_title": "Inventory Management",
     "site_header": "Inventory Management",
@@ -390,3 +379,59 @@ JAZZMIN_SETTINGS = {
     "show_sidebar": True,
     "navigation_expanded": True,
 }
+
+# ============================================
+# LOGGING CONFIGURATION (Optional but recommended)
+# ============================================
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '{levelname} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+        'file': {
+            'class': 'logging.FileHandler',
+            'filename': BASE_DIR / 'logs/django.log',
+            'formatter': 'verbose',
+        },
+        'mail_admins': {
+            'level': 'ERROR',
+            'class': 'django.utils.log.AdminEmailHandler',
+            'formatter': 'verbose',
+        },
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'),
+            'propagate': True,
+        },
+        'django.security': {
+            'handlers': ['console', 'mail_admins' if not DEBUG else 'console'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+        'accounts': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG' if DEBUG else 'INFO',
+            'propagate': False,
+        },
+    },
+}
+
+# Create logs directory if it doesn't exist
+if not os.path.exists(BASE_DIR / 'logs'):
+    os.makedirs(BASE_DIR / 'logs')

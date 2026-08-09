@@ -2,11 +2,17 @@ from django.utils.functional import SimpleLazyObject
 from tenants.models import Tenant, TenantMember
 
 
-def _resolve_tenant(request):
-    slug = request.headers.get("X-Tenant-Slug") or request.GET.get("tenant")
+def _get_tenant_from_request(request):
+    """
+    Resolve the tenant from the request in order of priority:
+    1. X-Tenant-Slug header
+    2. tenant query parameter
+    3. User's owned tenant (if authenticated)
+    """
+    tenant_slug = request.headers.get("X-Tenant-Slug") or request.GET.get("tenant")
 
-    if slug:
-        return Tenant.objects.filter(slug=slug, is_active=True).first()
+    if tenant_slug:
+        return Tenant.objects.filter(slug=tenant_slug, is_active=True).first()
 
     if request.user.is_authenticated:
         return getattr(request.user, "owned_tenant", None)
@@ -15,9 +21,14 @@ def _resolve_tenant(request):
 
 
 class TenantMiddleware:
+    """
+    Middleware that attaches the current tenant to the request object.
+    The tenant is resolved lazily to avoid unnecessary database queries.
+    """
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
-        request.tenant = SimpleLazyObject(lambda: _resolve_tenant(request))
+        # Attach tenant as a lazy object - resolves only when accessed
+        request.tenant = SimpleLazyObject(lambda: _get_tenant_from_request(request))
         return self.get_response(request)

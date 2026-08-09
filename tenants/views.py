@@ -12,24 +12,24 @@ from .models import Tenant, TenantMember
 from .serializers import TenantSerializer, TenantMemberSerializer
 
 
-# ── Tenant CRUD (platform admin only) ────────────────────────────────────────
+# ── Tenant Management (Platform Admin Only) ────────────────────────────────────
 
 class TenantViewSet(viewsets.ModelViewSet):
     """
-    CRUD for Tenants (vendor stores).
+    Complete CRUD operations for Tenant (vendor stores) management.
 
-    Who can use this:
-      - Platform admin (is_staff=True) — full CRUD + approve/reject
-      - Any authenticated user — GET /api/tenants/me/ to read their own tenant
+    Access Control:
+      - Platform administrators (is_staff=True) — full CRUD + approval workflow
+      - Authenticated users — GET /api/tenants/me/ to view their own store
 
-    Filter pending stores: GET /api/tenants/?is_active=false
+    Filter pending registrations: GET /api/tenants/?is_active=false
     """
-    queryset         = Tenant.objects.select_related('owner').order_by('name')
+    queryset = Tenant.objects.select_related('owner').order_by('name')
     serializer_class = TenantSerializer
-    filter_backends  = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['is_active']
-    search_fields    = ['name', 'slug', 'owner__username', 'owner__email']
-    ordering_fields  = ['name', 'created_at']
+    search_fields = ['name', 'slug', 'owner__username', 'owner__email']
+    ordering_fields = ['name', 'created_at']
 
     def get_permissions(self):
         if self.action == 'me':
@@ -37,14 +37,14 @@ class TenantViewSet(viewsets.ModelViewSet):
         return [IsPlatformAdmin()]
 
     @extend_schema(
-        summary='List all stores',
+        summary='Get all vendor stores',
         description=(
-            'Returns all vendor stores. Use `?is_active=false` to see pending registrations '
-            'that need approval.'
+            'Retrieves a complete list of vendor stores. '
+            'Use `?is_active=false` to view pending approval registrations.'
         ),
         parameters=[
             OpenApiParameter('is_active', bool, description='Filter by active status. false = pending stores.'),
-            OpenApiParameter('search', str, description='Search by name, slug, or owner username/email.'),
+            OpenApiParameter('search', str, description='Search by name, slug, or owner credentials.'),
         ],
         tags=['Tenants'],
     )
@@ -52,16 +52,16 @@ class TenantViewSet(viewsets.ModelViewSet):
         return super().list(request, *args, **kwargs)
 
     @extend_schema(
-        summary='Create a store (admin)',
-        description='Manually register a vendor store. Use vendor/register for self-registration.',
+        summary='Create a new store (admin)',
+        description='Admin-only endpoint for manual store registration. Users should use vendor/register for self-registration.',
         tags=['Tenants'],
         examples=[
             OpenApiExample(
-                name='Create Store Example',
+                name='Store Creation Example',
                 value={
-                    'name': 'TechMart Nepal',
-                    'slug': 'techmart',
-                    'description': 'Best electronics store in Nepal.',
+                    'name': 'ElectroHub Nepal',
+                    'slug': 'electrohub',
+                    'description': 'Premium electronics and gadgets store.',
                     'owner': 1,
                     'is_active': True,
                 },
@@ -72,25 +72,25 @@ class TenantViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         return super().create(request, *args, **kwargs)
 
-    @extend_schema(summary='Retrieve a store', tags=['Tenants'])
+    @extend_schema(summary='Get store details', tags=['Tenants'])
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
 
-    @extend_schema(summary='Update a store', tags=['Tenants'])
+    @extend_schema(summary='Full store update', tags=['Tenants'])
     def update(self, request, *args, **kwargs):
         return super().update(request, *args, **kwargs)
 
-    @extend_schema(summary='Partial update a store', tags=['Tenants'])
+    @extend_schema(summary='Partial store update', tags=['Tenants'])
     def partial_update(self, request, *args, **kwargs):
         return super().partial_update(request, *args, **kwargs)
 
-    @extend_schema(summary='Delete a store', tags=['Tenants'])
+    @extend_schema(summary='Remove a store', tags=['Tenants'])
     def destroy(self, request, *args, **kwargs):
         return super().destroy(request, *args, **kwargs)
 
     @extend_schema(
-        summary='My Store',
-        description='Returns the store owned by the currently logged-in vendor admin.',
+        summary='Get my store',
+        description='Returns the store belonging to the currently authenticated vendor.',
         responses={200: TenantSerializer},
         tags=['Tenants'],
     )
@@ -100,20 +100,20 @@ class TenantViewSet(viewsets.ModelViewSet):
             tenant = request.user.owned_tenant
         except Tenant.DoesNotExist:
             return Response(
-                {'error': 'You do not own a store.'},
+                {'error': 'No store associated with your account.'},
                 status=status.HTTP_404_NOT_FOUND,
             )
         return Response(TenantSerializer(tenant).data)
 
     @extend_schema(
-        summary='Approve a vendor store',
+        summary='Approve pending store',
         description=(
-            'Activate a pending vendor store. '
-            'The vendor will then be able to log in and use the API.'
+            'Activates a vendor store that is awaiting approval. '
+            'Once approved, the vendor gains full access to the platform.'
         ),
         request=None,
         responses={
-            200: OpenApiResponse(description='Store approved and activated.'),
+            200: OpenApiResponse(description='Store successfully activated.'),
             400: OpenApiResponse(description='Store is already active.'),
         },
         tags=['Tenants'],
@@ -130,9 +130,9 @@ class TenantViewSet(viewsets.ModelViewSet):
         tenant.save(update_fields=['is_active'])
         return Response(
             {
-                'detail': f'Store "{tenant.name}" has been approved and is now active.',
+                'detail': f'Store "{tenant.name}" has been approved and activated.',
                 'store': {
-                    'id':   tenant.id,
+                    'id': tenant.id,
                     'name': tenant.name,
                     'slug': tenant.slug,
                 },
@@ -141,16 +141,16 @@ class TenantViewSet(viewsets.ModelViewSet):
         )
 
     @extend_schema(
-        summary='Reject a vendor store',
+        summary='Reject pending store',
         description=(
-            'Reject and delete a pending vendor store registration. '
-            'The vendor\'s user account is kept so they can re-apply. '
-            'Only works on inactive (pending) stores.'
+            'Rejects and deletes a vendor store registration. '
+            'The vendor account remains active for future re-applications. '
+            'Only applies to inactive (pending) stores.'
         ),
         request=None,
         responses={
-            200: OpenApiResponse(description='Store registration rejected and deleted.'),
-            400: OpenApiResponse(description='Cannot reject an already active store.'),
+            200: OpenApiResponse(description='Store registration rejected and removed.'),
+            400: OpenApiResponse(description='Cannot reject an active store.'),
         },
         tags=['Tenants'],
     )
@@ -168,33 +168,32 @@ class TenantViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         owner_username = tenant.owner.username
-        store_name     = tenant.name
+        store_name = tenant.name
         tenant.delete()
         return Response(
             {
                 'detail': (
-                    f'Store registration for "{store_name}" (owner: {owner_username}) '
-                    f'has been rejected and removed. '
-                    f'The owner\'s account has been kept — they can re-apply.'
+                    f'Store "{store_name}" (owner: {owner_username}) has been rejected and removed. '
+                    f'The owner can re-apply for store registration.'
                 )
             },
             status=status.HTTP_200_OK,
         )
 
 
-# ── Tenant Member management (store owner only) ───────────────────────────────
+# ── Team Member Management (Store Owner Only) ────────────────────────────────
 
 class TenantMemberViewSet(viewsets.ModelViewSet):
     """
-    Manage your store's team members.
+    Manage your store's team members and their roles.
 
-    Only the store owner can add / update / remove members.
-    Requires X-Tenant-Slug header.
+    Authorization: Only the store owner can manage team members.
+    Header Requirement: X-Tenant-Slug must be provided.
 
-    Roles:
-      manager — full store access (products, warehouses, inventory, coupons, orders)
-      staff   — manage inventory and view orders
-      viewer  — read-only access to store data
+    Available Roles:
+      manager — Full store access (products, warehouses, inventory, coupons, orders)
+      staff   — Manage inventory and view orders
+      viewer  — Read-only access to store data
     """
     serializer_class = TenantMemberSerializer
     http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
@@ -214,18 +213,18 @@ class TenantMemberViewSet(viewsets.ModelViewSet):
         return ctx
 
     @extend_schema(
-        summary='List team members',
-        description='Returns all members of your store.',
+        summary='List all team members',
+        description='Get a complete list of all members associated with your store.',
         tags=['Team Members'],
     )
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 
     @extend_schema(
-        summary='Add a team member',
+        summary='Add team member',
         description=(
-            'Add a registered user to your store with a role. '
-            'The user must already have an account on the platform.'
+            'Add an existing platform user to your store with a specific role. '
+            'The user must already have a registered account.'
         ),
         request=TenantMemberSerializer,
         tags=['Team Members'],
@@ -252,7 +251,7 @@ class TenantMemberViewSet(viewsets.ModelViewSet):
 
     @extend_schema(
         summary='Update member role',
-        description="Change a team member's role or activate/deactivate them.",
+        description="Modify a team member's role or toggle their active status.",
         request=TenantMemberSerializer,
         tags=['Team Members'],
         examples=[
@@ -272,8 +271,8 @@ class TenantMemberViewSet(viewsets.ModelViewSet):
         return super().partial_update(request, *args, **kwargs)
 
     @extend_schema(
-        summary='Remove a team member',
-        description='Remove a user from your store.',
+        summary='Remove team member',
+        description='Remove a user from your store team.',
         tags=['Team Members'],
     )
     def destroy(self, request, *args, **kwargs):
