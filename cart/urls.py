@@ -19,22 +19,22 @@ from .views import (
 )
 
 urlpatterns = [
-    # Cart
+    # Cart Management
     path("", CartView.as_view(), name="cart"),
     path("add/", AddToCartView.as_view(), name="cart-add"),
     path("summary/", CartSummaryView.as_view(), name="cart-summary"),
     path("checkout/", CartCheckoutView.as_view(), name="cart-checkout"),
     path("clear/", ClearCartView.as_view(), name="cart-clear"),
 
-    # Cart Items
+    # Cart Item Operations
     path("item/<int:pk>/", UpdateCartItemView.as_view(), name="cart-item-update"),
     path("item/<int:pk>/delete/", DeleteCartItemView.as_view(), name="cart-item-delete"),
 
-    # Coupons
+    # Coupon Operations
     path("apply-coupon/", ApplyCouponView.as_view(), name="cart-apply-coupon"),
     path("remove-coupon/", RemoveCouponView.as_view(), name="cart-remove-coupon"),
 
-    # Save For Later
+    # Save for Later Operations
     path("save-for-later/", SaveForLaterView.as_view(), name="save-for-later"),
     path("saved-items/", SavedItemsView.as_view(), name="saved-items"),
     path("move-to-cart/", MoveToCartView.as_view(), name="move-to-cart"),
