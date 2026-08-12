@@ -3,6 +3,12 @@ from .models import Coupon
 
 
 class CouponSerializer(serializers.ModelSerializer):
+    """
+    Serializer for Coupon model.
+
+    Handles creation, retrieval, and updates of coupon instances.
+    Includes all relevant fields with appropriate read-only settings.
+    """
 
     class Meta:
         model = Coupon
@@ -20,17 +26,38 @@ class CouponSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'used_count', 'created_at']
 
-class ValidateCouponSerializer(serializers.Serializer):
 
-    code = serializers.CharField()
+class ValidateCouponSerializer(serializers.Serializer):
+    """
+    Serializer for validating a coupon without applying it.
+
+    Validates the coupon code, checks expiration, usage limits,
+    and verifies minimum order amount requirements.
+    """
+
+    code = serializers.CharField(
+        help_text='Coupon code to validate.'
+    )
 
     order_amount = serializers.DecimalField(
         max_digits=10,
-        decimal_places=2
+        decimal_places=2,
+        help_text='Order amount to check against minimum order requirement.'
     )
 
     def validate(self, data):
+        """
+        Validate the coupon code and check all conditions.
 
+        Args:
+            data: Dictionary containing 'code' and 'order_amount'
+
+        Returns:
+            dict: Data with added 'coupon' object
+
+        Raises:
+            ValidationError: If coupon is invalid or conditions not met
+        """
         code = data["code"].upper()
         order_amount = data["order_amount"]
         tenant = getattr(self.context.get("request"), "tenant", None)
@@ -65,8 +92,15 @@ class ValidateCouponSerializer(serializers.Serializer):
         data["coupon"] = coupon
 
         return data
-    
+
+
 class ApplyCouponSerializer(serializers.Serializer):
+    """
+    Serializer for applying a coupon to an order.
+
+    Validates the coupon, calculates the discount amount,
+    and returns the final amount after discount.
+    """
 
     code = serializers.CharField(
         help_text='Enter coupon code to apply at checkout.'
@@ -78,6 +112,18 @@ class ApplyCouponSerializer(serializers.Serializer):
     )
 
     def validate(self, data):
+        """
+        Validate the coupon and calculate the discount.
+
+        Args:
+            data: Dictionary containing 'code' and 'order_amount'
+
+        Returns:
+            dict: Data with added 'coupon', 'discount', and 'final_amount'
+
+        Raises:
+            ValidationError: If coupon is invalid or conditions not met
+        """
         code = data['code'].upper()
         order_amount = data['order_amount']
         tenant = getattr(self.context.get('request'), 'tenant', None)
